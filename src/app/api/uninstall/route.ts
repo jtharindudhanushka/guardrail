@@ -10,7 +10,12 @@ Stop-ScheduledTask -TaskName "GuardrailAgent"
 Unregister-ScheduledTask -TaskName "GuardrailAgent" -Confirm:$false
 
 Write-Host "Guardrail: killing any running agent process..."
-Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*Guardrail*" } | Stop-Process -Force
+# node.exe lives in Program Files, so match on the command line (agent.js), not the
+# executable path - matching the path finds nothing and leaves the agent running.
+Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -like "*agent.js*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
 
 $dataDir = "$env:ProgramData\\Guardrail"
 $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"

@@ -35,6 +35,18 @@ $appDir = "$dataDir\\app"
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 New-Item -ItemType Directory -Force -Path $appDir | Out-Null
 
+# Clear any stale redirects from a previous install. Without this, a hosts entry left
+# behind by a dead agent keeps sites unreachable (ERR_CONNECTION_REFUSED) even now.
+$hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
+if (Test-Path $hostsPath) {
+  $hostsContent = Get-Content $hostsPath -Raw
+  if ($hostsContent -match "GUARDRAIL-START") {
+    Write-Host "Guardrail: clearing stale hosts entries from a previous install..."
+    $cleanedHosts = [regex]::Replace($hostsContent, "(?s)\\r?\\n# GUARDRAIL-START.*?# GUARDRAIL-END\\r?\\n?", "\`r\`n")
+    Set-Content -Path $hostsPath -Value $cleanedHosts -NoNewline
+  }
+}
+
 Write-Host "Guardrail: checking for Node.js..."
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
@@ -83,27 +95,63 @@ New-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -Direction Outbound -Acti
 $config = @{ portalUrl = "${origin}"; pairingCode = "${code}" } | ConvertTo-Json
 Set-Content -Path "$dataDir\\config.json" -Value $config
 
+Write-Host "Guardrail: stopping any previous agent..."
+Stop-ScheduledTask -TaskName "GuardrailAgent" -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -like "*Guardrail*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+# A wrapper .cmd avoids Task Scheduler quoting problems with paths that contain
+# spaces (e.g. C:\\Program Files\\nodejs) and captures stdout/stderr so a failed
+# launch leaves evidence instead of silently doing nothing.
+$runnerPath = "$appDir\\run-agent.cmd"
+$runner = "@echo off\`r\`ncd /d ""%~dp0""\`r\`n""$nodePath"" agent.js >> ""$dataDir\\agent-stdout.log"" 2>&1\`r\`n"
+Set-Content -Path $runnerPath -Value $runner -Encoding ASCII
+
 Write-Host "Guardrail: registering startup task..."
-$action = New-ScheduledTaskAction -Execute $nodePath -Argument "agent.js" -WorkingDirectory $appDir
-$trigger = New-ScheduledTaskTrigger -AtStartup
+$action = New-ScheduledTaskAction -Execute $runnerPath -WorkingDirectory $appDir
+$triggerBoot = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
-Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+# AllowStartIfOnBatteries / DontStopIfGoingOnBatteries are essential on a laptop:
+# by default Task Scheduler refuses to start a task on battery power and reports
+# no error, which looks exactly like the task silently never running.
+$settings = New-ScheduledTaskSettingsSet \`
+  -AllowStartIfOnBatteries \`
+  -DontStopIfGoingOnBatteries \`
+  -StartWhenAvailable \`
+  -ExecutionTimeLimit ([TimeSpan]::Zero) \`
+  -MultipleInstances IgnoreNew \`
+  -RestartCount 999 \`
+  -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot -Principal $principal -Settings $settings -Force | Out-Null
 
 Start-ScheduledTask -TaskName "GuardrailAgent"
 
 Write-Host "Guardrail: verifying the agent started and paired..."
-Start-Sleep -Seconds 5
+$paired = $false
+for ($i = 0; $i -lt 15; $i++) {
+  Start-Sleep -Seconds 2
+  $configNow = Get-Content "$dataDir\\config.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+  if ($configNow.apiKey) { $paired = $true; break }
+}
+
 $info = Get-ScheduledTaskInfo -TaskName "GuardrailAgent"
-$configNow = Get-Content "$dataDir\\config.json" -Raw | ConvertFrom-Json
+$running = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -like "*agent.js*" }
 
 Write-Host ""
-if ($configNow.apiKey) {
-  Write-Host "Guardrail installed and paired. It will start automatically on every boot."
+if ($paired -and $running) {
+  Write-Host "Guardrail is installed, paired, and running."
+  Write-Host "It starts automatically on every boot - no terminal needs to stay open."
 } else {
-  Write-Host "Guardrail installed, but pairing hasn't completed yet (last task result: $($info.LastTaskResult))."
-  Write-Host "Check the log for details:"
+  Write-Host "Guardrail installed, but the agent isn't fully up yet."
+  Write-Host "  paired:            $paired"
+  Write-Host "  agent running:     $([bool]$running)"
+  Write-Host "  last task result:  $($info.LastTaskResult)"
+  Write-Host ""
+  Write-Host "Check the logs:"
   Write-Host "  Get-Content ""$dataDir\\agent.log"" -Tail 30"
+  Write-Host "  Get-Content ""$dataDir\\agent-stdout.log"" -Tail 30"
 }
 `;
 

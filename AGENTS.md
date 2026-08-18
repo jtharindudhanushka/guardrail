@@ -104,6 +104,18 @@ directly — don't add a way to mark a device online without a real poll hitting
 - **Site blocking**: hosts-file redirect to `127.0.0.1` for domains over budget
   (`agent-src/lib/hosts.js`), scoped by marker comments so it never touches the rest
   of the file.
+- **Fail-open is a hard invariant.** A hosts entry pointing at `127.0.0.1` while
+  nothing is listening there produces `ERR_CONNECTION_REFUSED` on every request —
+  the site appears completely dead rather than showing a block page, and it stays
+  that way after the agent dies. Two rules follow, both already implemented; don't
+  regress them:
+  1. `interceptServer.start()` returns a promise that resolves *only* once both
+     listeners are actually bound. Never write hosts entries before it resolves; if
+     it rejects (port 443 in use, no admin rights), release all blocks and exit.
+  2. `agent.js` installs cleanup handlers (`SIGINT`/`SIGTERM`/`SIGHUP`/`exit`/
+     `uncaughtException`) that call `applyBlockedDomains([])`. The installer also
+     clears any stale marked block at the start of a fresh install, since a
+     hard-killed agent can't run its own handlers.
 - **Time budget tracking is wall-clock-while-unblocked**, not real active-tab
   detection — there's no browser extension or packet inspection telling the agent
   whether the user is actually looking at the tab. Every poll tick that a site is
@@ -140,6 +152,29 @@ directly — don't add a way to mark a device online without a real poll hitting
   provider added later, will still bypass enforcement. `uninstall.ps1` removes the
   same firewall rule by display name. If this list needs extending, keep it in sync
   in both routes.
+
+## Windows scheduled task gotchas
+
+The agent runs via a `GuardrailAgent` scheduled task (SYSTEM, highest privileges,
+`-AtStartup`). Things that silently break it — all worked around in
+`src/app/api/install/route.ts`, keep them:
+
+- **Battery power.** Task Scheduler's default settings refuse to start a task on
+  battery and report *no error* (`LastTaskResult` stays `0`), which looks exactly
+  like the task never existing. `-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`
+  is mandatory on a laptop.
+- **Paths with spaces.** `-Execute` pointed at `C:\Program Files\nodejs\node.exe`
+  can fail to launch. The task now runs a generated `run-agent.cmd` wrapper instead,
+  which also redirects stdout/stderr to `agent-stdout.log` so a failed launch leaves
+  evidence rather than nothing.
+- **Bare `node.exe` on PATH.** Right after winget installs Node, the Task Scheduler
+  service may not see the updated PATH. Always resolve and embed the full path.
+- `-ExecutionTimeLimit ([TimeSpan]::Zero)` — otherwise the task is killed after the
+  default 3 days.
+
+Two log files exist on the device: `agent.log` (written by the agent itself) and
+`agent-stdout.log` (raw stdout/stderr from the wrapper — the place to look when the
+agent appears to not start at all).
 
 ## Design system
 

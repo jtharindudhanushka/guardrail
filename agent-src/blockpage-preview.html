@@ -1,44 +1,8 @@
-// Self-contained block page - no external fonts, styles, or scripts, since the very
-// domain being blocked is the one the browser is trying to reach.
-const GLYPHS = {
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/>',
-  play: '<circle cx="12" cy="12" r="9"/><path d="M10 9l5 3-5 3z"/>',
-};
-
-function blockPageHtml(title, message, options = {}) {
-  const { detail = null, showResetCountdown = false, icon = "clock" } = options;
-  const glyph = GLYPHS[icon] || GLYPHS.clock;
-
-  const countdown = showResetCountdown
-    ? `
-    <div class="reset">
-      <span class="reset-label">Resets in</span>
-      <span class="reset-time" id="countdown">—</span>
-    </div>
-    <script>
-      (function () {
-        var el = document.getElementById("countdown");
-        function tick() {
-          var now = new Date();
-          var midnight = new Date(now);
-          midnight.setHours(24, 0, 0, 0);
-          var diff = midnight - now;
-          var h = Math.floor(diff / 3600000);
-          var m = Math.floor((diff % 3600000) / 60000);
-          var s = Math.floor((diff % 60000) / 1000);
-          el.textContent = h + "h " + String(m).padStart(2, "0") + "m " + String(s).padStart(2, "0") + "s";
-        }
-        tick();
-        setInterval(tick, 1000);
-      })();
-    </script>`
-    : "";
-
-  return `<!doctype html>
+<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
+<title>Time's up for today</title>
 <style>
   :root {
     --canvas: #f5f5f7;
@@ -126,14 +90,32 @@ function blockPageHtml(title, message, options = {}) {
 <body>
   <div class="card">
     <div class="glyph">
-      <svg viewBox="0 0 24 24">${glyph}</svg>
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/></svg>
     </div>
-    <h1>${title}</h1>
-    <p class="message">${message}</p>
-    ${detail ? `<p class="detail">${detail}</p>` : ""}
-    ${countdown}
+    <h1>Time's up for today</h1>
+    <p class="message">You've used your daily time for this site.</p>
+    <p class="detail">instagram.com</p>
+    
+    <div class="reset">
+      <span class="reset-label">Resets in</span>
+      <span class="reset-time" id="countdown">—</span>
+    </div>
+    <script>
+      (function () {
+        var el = document.getElementById("countdown");
+        function tick() {
+          var now = new Date();
+          var midnight = new Date(now);
+          midnight.setHours(24, 0, 0, 0);
+          var diff = midnight - now;
+          var h = Math.floor(diff / 3600000);
+          var m = Math.floor((diff % 3600000) / 60000);
+          var s = Math.floor((diff % 60000) / 1000);
+          el.textContent = h + "h " + String(m).padStart(2, "0") + "m " + String(s).padStart(2, "0") + "s";
+        }
+        tick();
+        setInterval(tick, 1000);
+      })();
+    </script>
   </div>
-</body></html>`;
-}
-
-module.exports = { blockPageHtml };
+</body></html>

@@ -63,8 +63,13 @@ async function handleYoutubeSite(req, res, hostname) {
   if (videoId) {
     const allowed = await isAllowed(url.pathname, url.searchParams, currentYoutubeRules);
     if (!allowed) {
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(blockPageHtml("This video isn't on the whitelist", "Ask for it to be added, or request a bypass."));
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(
+        blockPageHtml("Not on the whitelist", "Only approved videos, channels, and playlists can play.", {
+          detail: `youtube.com/watch?v=${videoId}`,
+          icon: "play",
+        })
+      );
       return;
     }
   }
@@ -133,8 +138,13 @@ function requestHandler(req, res) {
   const hostname = (req.headers.host || "").split(":")[0];
 
   if (isBlockedSocialHost(hostname)) {
-    res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(blockPageHtml("Time's up for today", "This site is over its daily limit. Ask for a bypass if you need more time."));
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(
+      blockPageHtml("Time's up for today", "You've used your daily time for this site.", {
+        detail: hostname,
+        showResetCountdown: true,
+      })
+    );
     return;
   }
   if (YOUTUBE_HOSTS.has(hostname)) {
@@ -150,7 +160,27 @@ function requestHandler(req, res) {
   res.end("Not intercepted");
 }
 
-function start() {
+function listenOrFail(server, port, label) {
+  return new Promise((resolve, reject) => {
+    const onError = (err) => {
+      server.removeListener("listening", onListening);
+      reject(new Error(`${label} could not bind to 127.0.0.1:${port} — ${err.message}`));
+    };
+    const onListening = () => {
+      server.removeListener("error", onError);
+      log(`${label} listening on 127.0.0.1:${port}`);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+// Resolves only once both listeners are actually bound. The caller must not write any
+// hosts-file redirects before this resolves - pointing a domain at a dead 127.0.0.1
+// makes the site fail with ERR_CONNECTION_REFUSED instead of showing the block page.
+async function start() {
   const ca = ensureCA();
 
   const httpsServer = https.createServer(
@@ -165,18 +195,20 @@ function start() {
     requestHandler
   );
 
-  httpsServer.on("error", (err) => log("HTTPS intercept server error:", err.message));
-  httpsServer.listen(443, "127.0.0.1", () => log("YouTube/social intercept listening on 127.0.0.1:443"));
-
   const httpServer = http.createServer((req, res) => {
     const hostname = (req.headers.host || "").split(":")[0];
     res.writeHead(301, { Location: `https://${hostname}${req.url}` });
     res.end();
   });
-  httpServer.on("error", (err) => log("HTTP intercept server error:", err.message));
-  httpServer.listen(80, "127.0.0.1", () => log("HTTP redirect listening on 127.0.0.1:80"));
 
-  return { caCertPath: ca.cert };
+  await listenOrFail(httpsServer, 443, "HTTPS intercept");
+  await listenOrFail(httpServer, 80, "HTTP redirect");
+
+  // Runtime errors after a successful bind shouldn't take the process down.
+  httpsServer.on("error", (err) => log("HTTPS intercept server error:", err.message));
+  httpServer.on("error", (err) => log("HTTP intercept server error:", err.message));
+
+  return { httpsServer, httpServer };
 }
 
 module.exports = { start, setYoutubeRules, setBlockedDomains };

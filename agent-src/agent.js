@@ -73,6 +73,40 @@ async function tick(config) {
   log(`tick ok — blocked: [${blockedDomains.join(", ") || "none"}], youtube rules: ${rules.youtubeRules.length}`);
 }
 
+// Leaving hosts entries behind while nothing is listening on 127.0.0.1 makes every
+// affected site fail with ERR_CONNECTION_REFUSED, which looks like "the internet is
+// broken" rather than a block. Always fail open.
+let cleanedUp = false;
+function releaseAllBlocks(reason) {
+  if (cleanedUp) return;
+  cleanedUp = true;
+  try {
+    applyBlockedDomains([]);
+    log(`Released all hosts-file blocks (${reason}).`);
+  } catch (e) {
+    log(`Failed to release hosts-file blocks (${reason}):`, e.message);
+  }
+}
+
+function installCleanupHandlers() {
+  const bye = (reason) => () => {
+    releaseAllBlocks(reason);
+    process.exit(0);
+  };
+  process.on("SIGINT", bye("SIGINT"));
+  process.on("SIGTERM", bye("SIGTERM"));
+  process.on("SIGHUP", bye("SIGHUP"));
+  process.on("exit", () => releaseAllBlocks("exit"));
+  process.on("uncaughtException", (e) => {
+    log("Uncaught exception:", e.stack || e.message);
+    releaseAllBlocks("uncaughtException");
+    process.exit(1);
+  });
+  process.on("unhandledRejection", (e) => {
+    log("Unhandled rejection:", (e && e.stack) || String(e));
+  });
+}
+
 async function main() {
   const args = parseArgs();
 
@@ -88,7 +122,20 @@ async function main() {
 
   config = await ensurePaired(config);
 
-  interceptServer.start();
+  // Bind the intercept server BEFORE writing any hosts entries. If it can't bind
+  // (port 443 already in use, insufficient privileges), enforce nothing rather than
+  // black-holing traffic to a dead local port.
+  try {
+    await interceptServer.start();
+  } catch (e) {
+    log("FATAL: could not start the intercept server —", e.message);
+    log("Enforcement disabled and all blocks released so browsing still works.");
+    releaseAllBlocks("intercept server failed to bind");
+    process.exit(1);
+  }
+
+  installCleanupHandlers();
+
   // Always gate YouTube regardless of budgets - the whitelist is a standing policy.
   applyBlockedDomains(YOUTUBE_HOSTS);
 
@@ -104,6 +151,7 @@ async function main() {
 }
 
 main().catch((e) => {
-  log("Fatal:", e.message);
+  log("Fatal:", e.stack || e.message);
+  releaseAllBlocks("fatal error");
   process.exit(1);
 });
