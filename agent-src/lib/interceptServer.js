@@ -164,7 +164,7 @@ function listenOrFail(server, port, label) {
   return new Promise((resolve, reject) => {
     const onError = (err) => {
       server.removeListener("listening", onListening);
-      reject(new Error(`${label} could not bind to 127.0.0.1:${port} — ${err.message}`));
+      reject(new Error(`${label} could not bind to 127.0.0.1:${port} - ${err.message}`));
     };
     const onListening = () => {
       server.removeListener("error", onError);

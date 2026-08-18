@@ -109,7 +109,11 @@ $runner = "@echo off\`r\`ncd /d ""%~dp0""\`r\`n""$nodePath"" agent.js >> ""$data
 Set-Content -Path $runnerPath -Value $runner -Encoding ASCII
 
 Write-Host "Guardrail: registering startup task..."
-$action = New-ScheduledTaskAction -Execute $runnerPath -WorkingDirectory $appDir
+# Must launch through cmd.exe: CreateProcess cannot execute a .cmd/.bat directly, so
+# pointing -Execute at the wrapper leaves the task stuck in "Queued" forever with
+# LastTaskResult 0 and no process ever spawned.
+$cmdExe = "$env:SystemRoot\\System32\\cmd.exe"
+$action = New-ScheduledTaskAction -Execute $cmdExe -Argument "/c ""$runnerPath""" -WorkingDirectory $appDir
 $triggerBoot = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 # AllowStartIfOnBatteries / DontStopIfGoingOnBatteries are essential on a laptop:
@@ -118,14 +122,16 @@ $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 $settings = New-ScheduledTaskSettingsSet \`
   -AllowStartIfOnBatteries \`
   -DontStopIfGoingOnBatteries \`
-  -StartWhenAvailable \`
   -ExecutionTimeLimit ([TimeSpan]::Zero) \`
   -MultipleInstances IgnoreNew \`
   -RestartCount 999 \`
   -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot -Principal $principal -Settings $settings -Force | Out-Null
 
-Start-ScheduledTask -TaskName "GuardrailAgent"
+# Start it now for real, independently of Task Scheduler, so a first run never
+# depends on trigger behaviour. The boot trigger above covers subsequent restarts.
+Write-Host "Guardrail: starting the agent..."
+Start-Process -FilePath $nodePath -ArgumentList "agent.js" -WorkingDirectory $appDir -WindowStyle Hidden
 
 Write-Host "Guardrail: verifying the agent started and paired..."
 $paired = $false
@@ -136,17 +142,20 @@ for ($i = 0; $i -lt 15; $i++) {
 }
 
 $info = Get-ScheduledTaskInfo -TaskName "GuardrailAgent"
+$taskState = (Get-ScheduledTask -TaskName "GuardrailAgent").State
 $running = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -like "*agent.js*" }
 
 Write-Host ""
 if ($paired -and $running) {
   Write-Host "Guardrail is installed, paired, and running."
-  Write-Host "It starts automatically on every boot - no terminal needs to stay open."
+  Write-Host "No terminal needs to stay open - it restarts automatically on every boot."
+  Write-Host "  boot task state:   $taskState"
 } else {
   Write-Host "Guardrail installed, but the agent isn't fully up yet."
   Write-Host "  paired:            $paired"
   Write-Host "  agent running:     $([bool]$running)"
+  Write-Host "  boot task state:   $taskState"
   Write-Host "  last task result:  $($info.LastTaskResult)"
   Write-Host ""
   Write-Host "Check the logs:"

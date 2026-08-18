@@ -70,15 +70,20 @@ async function tick(config) {
 
   await portalClient.reportUsage(config.portalUrl, config.apiKey, usageReport).catch((e) => log("usage report failed:", e.message));
 
-  log(`tick ok — blocked: [${blockedDomains.join(", ") || "none"}], youtube rules: ${rules.youtubeRules.length}`);
+  log(`tick ok - blocked: [${blockedDomains.join(", ") || "none"}], youtube rules: ${rules.youtubeRules.length}`);
 }
 
 // Leaving hosts entries behind while nothing is listening on 127.0.0.1 makes every
 // affected site fail with ERR_CONNECTION_REFUSED, which looks like "the internet is
 // broken" rather than a block. Always fail open.
+//
+// Only ever release blocks this process actually wrote: if we exit because another
+// agent instance already owns port 443, its hosts entries are live and valid, and
+// clearing them would disable enforcement for the healthy instance.
+let ownsBlocks = false;
 let cleanedUp = false;
 function releaseAllBlocks(reason) {
-  if (cleanedUp) return;
+  if (cleanedUp || !ownsBlocks) return;
   cleanedUp = true;
   try {
     applyBlockedDomains([]);
@@ -128,15 +133,17 @@ async function main() {
   try {
     await interceptServer.start();
   } catch (e) {
-    log("FATAL: could not start the intercept server —", e.message);
-    log("Enforcement disabled and all blocks released so browsing still works.");
-    releaseAllBlocks("intercept server failed to bind");
+    // Most likely another agent instance already holds port 443. Exit without
+    // touching the hosts file - that instance's blocks are still valid.
+    log("Could not start the intercept server -", e.message);
+    log("Exiting without changing any blocks (another instance may already be running).");
     process.exit(1);
   }
 
   installCleanupHandlers();
 
   // Always gate YouTube regardless of budgets - the whitelist is a standing policy.
+  ownsBlocks = true;
   applyBlockedDomains(YOUTUBE_HOSTS);
 
   const loop = async () => {

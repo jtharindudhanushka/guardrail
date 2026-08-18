@@ -116,6 +116,10 @@ directly — don't add a way to mark a device online without a real poll hitting
      `uncaughtException`) that call `applyBlockedDomains([])`. The installer also
      clears any stale marked block at the start of a fresh install, since a
      hard-killed agent can't run its own handlers.
+  3. Cleanup is gated on an `ownsBlocks` flag, set only after this process
+     successfully binds and writes its own entries. A second instance that loses the
+     race for port 443 must exit *without* touching the hosts file — otherwise it
+     would wipe the healthy instance's blocks on its way out.
 - **Time budget tracking is wall-clock-while-unblocked**, not real active-tab
   detection — there's no browser extension or packet inspection telling the agent
   whether the user is actually looking at the tab. Every poll tick that a site is
@@ -163,10 +167,19 @@ The agent runs via a `GuardrailAgent` scheduled task (SYSTEM, highest privileges
   battery and report *no error* (`LastTaskResult` stays `0`), which looks exactly
   like the task never existing. `-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`
   is mandatory on a laptop.
+- **`.cmd`/`.bat` cannot be an `-Execute` target.** `CreateProcess` can't run a batch
+  file directly, so pointing `-Execute` at `run-agent.cmd` leaves the task stuck in
+  state `Queued` forever — `LastTaskResult` stays `0`, `LastRunTime` updates, and no
+  process is ever spawned (confirmed on a real device). The action must be
+  `cmd.exe /c "<path to .cmd>"`. If you ever see `Queued` with no `agent-stdout.log`,
+  this is the cause.
 - **Paths with spaces.** `-Execute` pointed at `C:\Program Files\nodejs\node.exe`
-  can fail to launch. The task now runs a generated `run-agent.cmd` wrapper instead,
+  can fail to launch. The task runs a generated `run-agent.cmd` wrapper instead,
   which also redirects stdout/stderr to `agent-stdout.log` so a failed launch leaves
   evidence rather than nothing.
+- **Don't rely on the task for the first run.** The installer starts the agent
+  directly with `Start-Process` and verifies pairing from that, so a working install
+  never depends on trigger behaviour; the task only covers restarts after boot.
 - **Bare `node.exe` on PATH.** Right after winget installs Node, the Task Scheduler
   service may not see the updated PATH. Always resolve and embed the full path.
 - `-ExecutionTimeLimit ([TimeSpan]::Zero)` — otherwise the task is killed after the
