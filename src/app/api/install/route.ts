@@ -67,6 +67,19 @@ Pop-Location
 Write-Host "Guardrail: trusting local CA (needed to whitelist specific YouTube videos)..."
 certutil -addstore -f "Root" "$dataDir\\ca-cert.pem" | Out-Null
 
+Write-Host "Guardrail: blocking known DNS-over-HTTPS resolvers (so browser 'Secure DNS' can't bypass the hosts file)..."
+$dohIPs = @(
+  "1.1.1.1", "1.0.0.1",
+  "8.8.8.8", "8.8.4.4",
+  "9.9.9.9", "149.112.112.112",
+  "208.67.222.222", "208.67.220.220",
+  "185.228.168.9", "185.228.169.9",
+  "94.140.14.14", "94.140.15.15"
+)
+Remove-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -Direction Outbound -Action Block -Protocol TCP -RemotePort 443,853 -RemoteAddress $dohIPs | Out-Null
+New-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443,853 -RemoteAddress $dohIPs | Out-Null
+
 $config = @{ portalUrl = "${origin}"; pairingCode = "${code}" } | ConvertTo-Json
 Set-Content -Path "$dataDir\\config.json" -Value $config
 

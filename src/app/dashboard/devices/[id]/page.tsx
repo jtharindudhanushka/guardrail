@@ -34,6 +34,7 @@ export default async function DeviceDetailPage({ params }: PageProps<"/dashboard
   const hdrs = await headers();
   const origin = `${hdrs.get("x-forwarded-proto") ?? "http"}://${hdrs.get("host")}`;
 
+  // eslint-disable-next-line react-hooks/purity -- Server Component, computed once per request, not re-rendered client-side
   const online = device.lastSeenAt ? Date.now() - device.lastSeenAt.getTime() < ONLINE_WINDOW_MS : false;
 
   return (

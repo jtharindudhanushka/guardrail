@@ -25,6 +25,9 @@ if (Test-Path $hostsPath) {
 Write-Host "Guardrail: removing the trusted local certificate..."
 Get-ChildItem Cert:\\LocalMachine\\Root | Where-Object { $_.Subject -match "Guardrail Local CA" } | Remove-Item -Force
 
+Write-Host "Guardrail: removing DNS-over-HTTPS firewall block..."
+Remove-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -ErrorAction SilentlyContinue
+
 Write-Host "Guardrail: removing installed files..."
 Remove-Item -Recurse -Force $dataDir -ErrorAction SilentlyContinue
 

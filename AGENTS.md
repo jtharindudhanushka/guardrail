@@ -128,6 +128,18 @@ directly — don't add a way to mark a device online without a real poll hitting
   (blocked social domains + the fixed YouTube host list). Keep it that way; don't
   widen the intercepted host set without a reason, for her privacy's sake as much as
   anyone's.
+- **Browser "Secure DNS" (DNS-over-HTTPS) bypasses the hosts file entirely** — if a
+  browser resolves domains itself via encrypted DNS to a public resolver instead of
+  asking the OS, it skips the hosts file redirect completely and defeats both the
+  site-blocking and the YouTube intercept. `install.ps1` (`src/app/api/install/route.ts`)
+  mitigates this by adding a Windows Firewall rule (`Guardrail-Block-DoH`) blocking
+  outbound 443/853 to the major public DoH/DoT resolver IPs (Cloudflare, Google,
+  Quad9, OpenDNS, CleanBrowsing, AdGuard), which forces "Automatic" Secure DNS mode
+  to fall back to the OS resolver. This is an IP-list allowlist-style hack, not a
+  complete solution — a browser pinned to a DoH provider outside that list, or a new
+  provider added later, will still bypass enforcement. `uninstall.ps1` removes the
+  same firewall rule by display name. If this list needs extending, keep it in sync
+  in both routes.
 
 ## Design system
 

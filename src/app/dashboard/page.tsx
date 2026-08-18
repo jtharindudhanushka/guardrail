@@ -37,6 +37,7 @@ export default async function DashboardPage() {
         )}
 
         {devices.map((d: Device) => {
+          // eslint-disable-next-line react-hooks/purity -- Server Component, computed once per request, not re-rendered client-side
           const online = d.lastSeenAt ? Date.now() - d.lastSeenAt.getTime() < ONLINE_WINDOW_MS : false;
           return (
             <Link
