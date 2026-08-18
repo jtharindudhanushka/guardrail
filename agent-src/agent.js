@@ -4,9 +4,11 @@ const { localDateKey, loadState, saveState } = require("./lib/state");
 const portalClient = require("./lib/portalClient");
 const interceptServer = require("./lib/interceptServer");
 const { ensureCA } = require("./lib/certs");
+const { selfUninstall } = require("./lib/selfUninstall");
 const { log } = require("./lib/log");
 
 const POLL_INTERVAL_MS = 15_000;
+const UNKNOWN_DEVICE_THRESHOLD = 4; // ~1 minute of consecutive 401s before self-uninstalling
 const YOUTUBE_HOSTS = ["youtube.com", "www.youtube.com", "m.youtube.com", "youtubei.googleapis.com"];
 
 function parseArgs() {
@@ -146,11 +148,29 @@ async function main() {
   ownsBlocks = true;
   applyBlockedDomains(YOUTUBE_HOSTS);
 
+  // A 401 means the portal doesn't recognise this API key, which - since keys are
+  // only ever issued at pairing and never rotated - means the Controller deleted the
+  // device. Require several consecutive rejections before acting, so a transient
+  // network or edge failure can never trigger an uninstall.
+  let unknownDeviceStreak = 0;
+
   const loop = async () => {
     try {
       await tick(config);
+      unknownDeviceStreak = 0;
     } catch (e) {
       log("tick error:", e.message);
+      if (e.statusCode === 401) {
+        unknownDeviceStreak += 1;
+        log(`Portal rejected this device (${unknownDeviceStreak}/${UNKNOWN_DEVICE_THRESHOLD}).`);
+        if (unknownDeviceStreak >= UNKNOWN_DEVICE_THRESHOLD) {
+          ownsBlocks = false; // selfUninstall clears the hosts file itself
+          selfUninstall();
+          process.exit(0);
+        }
+      } else {
+        unknownDeviceStreak = 0;
+      }
     }
     setTimeout(loop, POLL_INTERVAL_MS);
   };

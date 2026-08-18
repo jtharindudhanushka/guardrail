@@ -38,6 +38,16 @@ export async function createDevice(
   return undefined;
 }
 
+// Deleting the device also revokes its API key, which the agent on that machine
+// detects (repeated 401s) and responds to by uninstalling itself completely.
+export async function deleteDevice(deviceId: string) {
+  const userId = await requireUserId();
+  await assertOwnsDevice(userId, deviceId);
+  await prisma.device.delete({ where: { id: deviceId } });
+  revalidatePath("/dashboard");
+  redirect("/dashboard");
+}
+
 export async function regeneratePairingCode(deviceId: string) {
   const userId = await requireUserId();
   await assertOwnsDevice(userId, deviceId);

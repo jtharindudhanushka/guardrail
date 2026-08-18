@@ -12,6 +12,7 @@ import {
   BypassForm,
   RevokeBypassButton,
   RegenerateCodeButton,
+  DeleteDeviceButton,
 } from "./forms";
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -159,6 +160,20 @@ export default async function DeviceDetailPage({ params }: PageProps<"/dashboard
               ))}
             </div>
           )}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-[21px] font-semibold tracking-[0.231px] mb-1" style={{ color: "var(--color-ink)" }}>
+          Remove device
+        </h2>
+        <p className="text-[14px] mb-4" style={{ color: "var(--color-ink-muted-48)" }}>
+          Deletes this device and all its rules. The next time the agent checks in it will find itself
+          unrecognised and uninstall Guardrail from that laptop automatically — clearing the blocks,
+          the certificate, the firewall rule, and the startup task.
+        </p>
+        <div className="card-utility">
+          <DeleteDeviceButton deviceId={device.id} deviceName={device.name} />
         </div>
       </section>
     </div>

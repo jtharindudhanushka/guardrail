@@ -14,6 +14,7 @@ const AGENT_FILES = [
   "lib/youtubeRules.js",
   "lib/blockPage.js",
   "lib/interceptServer.js",
+  "lib/selfUninstall.js",
 ];
 
 export async function GET(req: NextRequest) {

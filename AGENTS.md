@@ -171,6 +171,26 @@ directly — don't add a way to mark a device online without a real poll hitting
   same firewall rule by display name. If this list needs extending, keep it in sync
   in both routes.
 
+## Remote uninstall on device deletion
+
+Deleting a device in the portal is also the remote-uninstall trigger. API keys are
+issued once at pairing and never rotated, so a `401` from `/api/agent/rules` means
+the device row is gone. After `UNKNOWN_DEVICE_THRESHOLD` (4) *consecutive* 401s —
+roughly a minute, so a transient network or edge failure can't trigger it — the agent
+runs `lib/selfUninstall.js`, which clears hosts entries in-process and then spawns a
+detached PowerShell that removes the scheduled task, the DoH firewall rule, the
+trusted CA, any leftover hosts block, and finally the whole data directory.
+
+Two things that will silently break this if changed:
+- The cleanup process **must not inherit the agent's cwd** (it sits inside the
+  directory being deleted; holding it open makes the removal fail). It's pinned to
+  `%SystemRoot%`.
+- The streak counter must reset on any non-401 error and on success. Never
+  self-uninstall on a single failure.
+
+`ownsBlocks` is cleared before calling `selfUninstall` so the normal exit handler
+doesn't race the cleanup script over the hosts file.
+
 ## Windows scheduled task gotchas
 
 The agent runs via a `GuardrailAgent` scheduled task (SYSTEM, highest privileges,

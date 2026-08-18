@@ -9,6 +9,7 @@ import {
   deleteYoutubeRule,
   revokeBypass,
   regeneratePairingCode,
+  deleteDevice,
 } from "../../actions";
 
 export function SiteRuleForm({ deviceId }: { deviceId: string }) {
@@ -120,6 +121,26 @@ export function RevokeBypassButton({ deviceId, bypassId }: { deviceId: string; b
     <form action={async () => await revokeBypass(deviceId, bypassId)}>
       <button className="text-[14px] text-link" type="submit">
         Revoke
+      </button>
+    </form>
+  );
+}
+
+export function DeleteDeviceButton({ deviceId, deviceName }: { deviceId: string; deviceName: string }) {
+  return (
+    <form
+      action={async () => {
+        await deleteDevice(deviceId);
+      }}
+      onSubmit={(e) => {
+        const ok = window.confirm(
+          `Remove "${deviceName}"?\n\nAll its limits and whitelist entries will be deleted, and Guardrail will uninstall itself from that laptop the next time the agent checks in.`
+        );
+        if (!ok) e.preventDefault();
+      }}
+    >
+      <button className="btn-secondary-pill" type="submit">
+        Remove this device
       </button>
     </form>
   );

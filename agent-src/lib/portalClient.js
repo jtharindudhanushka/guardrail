@@ -29,7 +29,9 @@ function request(method, urlStr, { headers = {}, body } = {}) {
             parsed = null;
           }
           if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+            const err = new Error(`HTTP ${res.statusCode}: ${data}`);
+            err.statusCode = res.statusCode;
+            reject(err);
           } else {
             resolve(parsed);
           }
