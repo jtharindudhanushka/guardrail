@@ -41,7 +41,15 @@ if (-not $node) {
   Write-Host "Node.js not found - installing via winget..."
   winget install --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements
   $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+  $node = Get-Command node -ErrorAction SilentlyContinue
 }
+if (-not $node) {
+  $fallback = "$env:ProgramFiles\\nodejs\\node.exe"
+  if (Test-Path $fallback) { $nodePath = $fallback } else { throw "Node.js install did not complete - re-run this installer after installing Node.js manually from nodejs.org." }
+} else {
+  $nodePath = $node.Source
+}
+Write-Host "Guardrail: using node at $nodePath"
 
 Write-Host "Guardrail: downloading agent..."
 ${fileDownloads}
@@ -53,7 +61,7 @@ Pop-Location
 
 Write-Host "Guardrail: generating local certificate authority..."
 Push-Location $appDir
-& node agent.js --generate-ca
+& $nodePath agent.js --generate-ca
 Pop-Location
 
 Write-Host "Guardrail: trusting local CA (needed to whitelist specific YouTube videos)..."
@@ -63,7 +71,7 @@ $config = @{ portalUrl = "${origin}"; pairingCode = "${code}" } | ConvertTo-Json
 Set-Content -Path "$dataDir\\config.json" -Value $config
 
 Write-Host "Guardrail: registering startup task..."
-$action = New-ScheduledTaskAction -Execute "node.exe" -Argument "agent.js" -WorkingDirectory $appDir
+$action = New-ScheduledTaskAction -Execute $nodePath -Argument "agent.js" -WorkingDirectory $appDir
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
@@ -71,8 +79,19 @@ Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $trig
 
 Start-ScheduledTask -TaskName "GuardrailAgent"
 
+Write-Host "Guardrail: verifying the agent started and paired..."
+Start-Sleep -Seconds 5
+$info = Get-ScheduledTaskInfo -TaskName "GuardrailAgent"
+$configNow = Get-Content "$dataDir\\config.json" -Raw | ConvertFrom-Json
+
 Write-Host ""
-Write-Host "Guardrail installed and running. It will start automatically on every boot."
+if ($configNow.apiKey) {
+  Write-Host "Guardrail installed and paired. It will start automatically on every boot."
+} else {
+  Write-Host "Guardrail installed, but pairing hasn't completed yet (last task result: $($info.LastTaskResult))."
+  Write-Host "Check the log for details:"
+  Write-Host "  Get-Content ""$dataDir\\agent.log"" -Tail 30"
+}
 `;
 
   return new NextResponse(script, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
