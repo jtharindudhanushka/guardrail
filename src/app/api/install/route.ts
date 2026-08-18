@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
 
   const script = `#Requires -RunAsAdministrator
 $ErrorActionPreference = "Stop"
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 $dataDir = "$env:ProgramData\\Guardrail"
 $appDir = "$dataDir\\app"
