@@ -142,6 +142,13 @@ Write-Host "Guardrail: registering startup task..."
 $cmdExe = "$env:SystemRoot\\System32\\cmd.exe"
 $action = New-ScheduledTaskAction -Execute $cmdExe -Argument "/c ""$runnerPath""" -WorkingDirectory $appDir
 $triggerBoot = New-ScheduledTaskTrigger -AtStartup
+# Watchdog: re-launch every 5 minutes so a crashed agent recovers on its own instead
+# of leaving the machine unenforced until the next reboot. If the agent is already
+# running, the new instance simply fails to bind port 443 and exits without touching
+# the hosts file, so repeated firing is harmless.
+$triggerWatchdog = New-ScheduledTaskTrigger -Once -At (Get-Date) \`
+  -RepetitionInterval (New-TimeSpan -Minutes 5) \`
+  -RepetitionDuration ([TimeSpan]::MaxValue)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 # AllowStartIfOnBatteries / DontStopIfGoingOnBatteries are essential on a laptop:
 # by default Task Scheduler refuses to start a task on battery power and reports
@@ -153,7 +160,7 @@ $settings = New-ScheduledTaskSettingsSet \`
   -MultipleInstances IgnoreNew \`
   -RestartCount 999 \`
   -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot -Principal $principal -Settings $settings -Force | Out-Null
+Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot, $triggerWatchdog -Principal $principal -Settings $settings -Force | Out-Null
 
 # Start it now for real, independently of Task Scheduler, so a first run never
 # depends on trigger behaviour. The boot trigger above covers subsequent restarts.

@@ -4,7 +4,7 @@
   "private": true,
   "main": "agent.js",
   "scripts": {
-    "test": "node test/routing.test.js"
+    "test": "node test/routing.test.js && node test/resilience.test.js"
   },
   "dependencies": {
     "node-forge": "^1.3.1"

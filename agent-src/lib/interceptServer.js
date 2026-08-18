@@ -3,7 +3,9 @@ const http = require("http");
 const tls = require("tls");
 const { URL } = require("url");
 const { ensureCA, getLeafCert } = require("./certs");
-const { resolveReal } = require("./resolve");
+// Imported as a namespace rather than destructured so tests can substitute
+// resolveReal - a destructured binding captures the original function forever.
+const dns = require("./resolve");
 const { isAllowed, extractVideoId } = require("./youtubeRules");
 const { blockPageHtml } = require("./blockPage");
 const { log } = require("./log");
@@ -26,8 +28,34 @@ function isBlockedSocialHost(hostname) {
   return currentBlockedDomains.has(bare) || currentBlockedDomains.has(hostname);
 }
 
+// An upstream can fail *after* we've already started streaming its response, at which
+// point writeHead throws ERR_HTTP_HEADERS_SENT. Unhandled, that takes the whole agent
+// down over a single dropped request - so every failure path goes through here.
+function failResponse(res, status, message) {
+  if (res.headersSent || res.writableEnded) {
+    res.destroy();
+    return;
+  }
+  try {
+    res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(message);
+  } catch {
+    res.destroy();
+  }
+}
+
+// Client aborts (closing a tab mid-load) surface as stream errors. They're routine,
+// not exceptional - swallow them rather than letting them reach uncaughtException.
+function ignoreStreamErrors(...streams) {
+  for (const s of streams) {
+    if (s && typeof s.on === "function") s.on("error", () => {});
+  }
+}
+
 function proxyPassthrough(req, res, hostname) {
-  resolveReal(hostname)
+  ignoreStreamErrors(req, res);
+
+  dns.resolveReal(hostname)
     .then((ip) => {
       const upstream = https.request(
         {
@@ -40,20 +68,16 @@ function proxyPassthrough(req, res, hostname) {
           rejectUnauthorized: false,
         },
         (upstreamRes) => {
+          ignoreStreamErrors(upstreamRes);
+          if (res.headersSent || res.writableEnded) return;
           res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
           upstreamRes.pipe(res);
         }
       );
-      upstream.on("error", () => {
-        res.writeHead(502);
-        res.end("Upstream error");
-      });
+      upstream.on("error", () => failResponse(res, 502, "Upstream error"));
       req.pipe(upstream);
     })
-    .catch(() => {
-      res.writeHead(502);
-      res.end("DNS resolution failed");
-    });
+    .catch(() => failResponse(res, 502, "DNS resolution failed"));
 }
 
 // Only top-level page loads should ever receive an HTML block page. Returning HTML
@@ -104,6 +128,7 @@ async function handleYoutubeSite(req, res, hostname) {
 }
 
 async function handleYoutubeApi(req, res, hostname) {
+  ignoreStreamErrors(req, res);
   const url = new URL(req.url, `https://${hostname}`);
   const isPlayerCall = url.pathname.includes("/youtubei/v1/player");
 
@@ -131,7 +156,7 @@ async function handleYoutubeApi(req, res, hostname) {
       }
     }
 
-    resolveReal(hostname)
+    dns.resolveReal(hostname)
       .then((ip) => {
         const upstream = https.request(
           {
@@ -144,20 +169,16 @@ async function handleYoutubeApi(req, res, hostname) {
             rejectUnauthorized: false,
           },
           (upstreamRes) => {
+            ignoreStreamErrors(upstreamRes);
+            if (res.headersSent || res.writableEnded) return;
             res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
             upstreamRes.pipe(res);
           }
         );
-        upstream.on("error", () => {
-          res.writeHead(502);
-          res.end("Upstream error");
-        });
+        upstream.on("error", () => failResponse(res, 502, "Upstream error"));
         upstream.end(body);
       })
-      .catch(() => {
-        res.writeHead(502);
-        res.end("DNS resolution failed");
-      });
+      .catch(() => failResponse(res, 502, "DNS resolution failed"));
   });
 }
 

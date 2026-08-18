@@ -171,6 +171,31 @@ directly — don't add a way to mark a device online without a real poll hitting
   same firewall rule by display name. If this list needs extending, keep it in sync
   in both routes.
 
+## Request-handling must never crash the process
+
+A single failed proxied request used to kill the entire agent: an upstream that errors
+*after* the response has started streaming makes `writeHead` throw
+`ERR_HTTP_HEADERS_SENT`, which reached `uncaughtException` and exited — releasing all
+blocks and leaving the machine unenforced until the next reboot. Observed in the wild
+after a brief DNS failure.
+
+Rules, all covered by `test/resilience.test.js`:
+- Every failure path goes through `failResponse()`, which checks
+  `headersSent`/`writableEnded` and additionally wraps `writeHead` in try/catch. The
+  try/catch is the load-bearing part — the flag check alone isn't sufficient, since a
+  response can end between the check and the write.
+- `ignoreStreamErrors()` attaches no-op error handlers to req/res/upstream streams.
+  Client aborts are routine, not exceptional. It also guards `typeof s.on` — a
+  crash-prevention helper must not be able to crash.
+- `lib/resolve` is imported as a namespace (`dns`), not destructured, so tests can
+  substitute `resolveReal`. A destructured binding captures the original forever and
+  silently makes DNS stubs no-ops — which previously left `routing.test.js` passing
+  only because real DNS happened to fail in the sandbox.
+
+The scheduled task also carries a 5-minute repetition trigger as a watchdog, so a
+crashed agent recovers on its own. Duplicate launches are harmless: the second
+instance fails to bind port 443 and exits without touching the hosts file.
+
 ## Updating an installed agent
 
 Re-running the install command **without** `?code=` upgrades an existing install in

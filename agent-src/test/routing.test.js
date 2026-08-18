@@ -7,14 +7,20 @@ const path = require("path");
 process.env.GUARDRAIL_DATA_DIR = path.join(__dirname, ".tmp-testdata");
 
 // Stub DNS resolution so a "passthrough" decision fails fast and is distinguishable
-// from a block-page decision (502 vs. HTML body).
-const resolve = require("../lib/resolve");
-resolve.resolveReal = () => Promise.reject(new Error("stubbed"));
+// from a block-page decision (502 vs. HTML body). Never hits the network.
+const dns = require("../lib/resolve");
+dns.resolveReal = () => Promise.reject(new Error("stubbed"));
 
 const interceptServer = require("../lib/interceptServer");
 
 function makeReq({ host, url, dest = "document" }) {
-  return { headers: { host, "sec-fetch-dest": dest, accept: "text/html" }, url, method: "GET", on: () => {}, pipe: () => {} };
+  return {
+    headers: { host, "sec-fetch-dest": dest, accept: "text/html" },
+    url,
+    method: "GET",
+    on: () => {},
+    pipe: () => {},
+  };
 }
 
 function run(req) {
@@ -22,8 +28,12 @@ function run(req) {
     let status = null;
     let body = "";
     const res = {
-      writeHead: (s) => { status = s; },
-      end: (chunk) => { body = chunk || ""; resolve({ status, body }); },
+      headersSent: false,
+      writableEnded: false,
+      on: () => {},
+      destroy: () => resolve({ status, body }),
+      writeHead: (s) => { status = s; res.headersSent = true; },
+      end: (chunk) => { body = chunk || ""; res.writableEnded = true; resolve({ status, body }); },
     };
     interceptServer.requestHandler(req, res);
   });
