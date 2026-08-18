@@ -109,7 +109,9 @@ export default async function DeviceDetailPage({ params }: PageProps<"/dashboard
           YouTube whitelist
         </h2>
         <p className="text-[14px] mb-4" style={{ color: "var(--color-ink-muted-48)" }}>
-          Only whitelisted videos, channels, or playlists will play. Everything else on YouTube is blocked.
+          Only whitelisted videos, channels, or playlists will play. Everything else on YouTube is blocked —
+          you don&apos;t need a time budget for this. If you do set one on youtube.com, approved videos still
+          play once it runs out; only browsing and search are cut off.
         </p>
         <div className="card-utility flex flex-col gap-4">
           <YoutubeRuleForm deviceId={device.id} />

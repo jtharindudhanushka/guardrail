@@ -56,6 +56,16 @@ function proxyPassthrough(req, res, hostname) {
     });
 }
 
+// Only top-level page loads should ever receive an HTML block page. Returning HTML
+// for a script/image/fetch sub-resource silently breaks the page instead of blocking
+// it - which would break playback of a whitelisted video whose assets live on
+// youtube.com paths.
+function isDocumentRequest(req) {
+  const dest = req.headers["sec-fetch-dest"];
+  if (dest) return dest === "document";
+  return (req.headers.accept || "").includes("text/html");
+}
+
 async function handleYoutubeSite(req, res, hostname) {
   const url = new URL(req.url, `https://${hostname}`);
   const videoId = extractVideoId(url.pathname, url.searchParams);
@@ -72,7 +82,24 @@ async function handleYoutubeSite(req, res, hostname) {
       );
       return;
     }
+    // Explicitly approved content is exempt from any youtube.com time budget.
+    proxyPassthrough(req, res, hostname);
+    return;
   }
+
+  // Everything that isn't approved playback (home, search, channel browsing) still
+  // respects the daily time budget.
+  if (isBlockedSocialHost(hostname) && isDocumentRequest(req)) {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(
+      blockPageHtml("Time's up for today", "You can still open videos that have been approved.", {
+        detail: hostname,
+        showResetCountdown: true,
+      })
+    );
+    return;
+  }
+
   proxyPassthrough(req, res, hostname);
 }
 
@@ -137,6 +164,18 @@ async function handleYoutubeApi(req, res, hostname) {
 function requestHandler(req, res) {
   const hostname = (req.headers.host || "").split(":")[0];
 
+  // YouTube is handled by the whitelist first, so approved videos stay playable even
+  // once a youtube.com time budget is exhausted. handleYoutubeSite applies the budget
+  // itself to everything that isn't approved playback.
+  if (YOUTUBE_HOSTS.has(hostname)) {
+    handleYoutubeSite(req, res, hostname);
+    return;
+  }
+  if (YOUTUBE_API_HOSTS.has(hostname)) {
+    handleYoutubeApi(req, res, hostname);
+    return;
+  }
+
   if (isBlockedSocialHost(hostname)) {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(
@@ -145,14 +184,6 @@ function requestHandler(req, res) {
         showResetCountdown: true,
       })
     );
-    return;
-  }
-  if (YOUTUBE_HOSTS.has(hostname)) {
-    handleYoutubeSite(req, res, hostname);
-    return;
-  }
-  if (YOUTUBE_API_HOSTS.has(hostname)) {
-    handleYoutubeApi(req, res, hostname);
     return;
   }
 
@@ -211,4 +242,5 @@ async function start() {
   return { httpsServer, httpServer };
 }
 
-module.exports = { start, setYoutubeRules, setBlockedDomains };
+// requestHandler is exported for the routing tests in test/routing.test.js.
+module.exports = { start, setYoutubeRules, setBlockedDomains, requestHandler };

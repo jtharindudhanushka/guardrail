@@ -126,6 +126,20 @@ directly — don't add a way to mark a device online without a real poll hitting
   under budget, its counter advances. This is a deliberate MVP tradeoff (no browser
   extension needed), not a bug — flag it if a request implies precise "active usage"
   tracking is expected.
+- **Whitelist beats budget, for playback only.** YouTube is always whitelist-gated
+  (the agent permanently routes YouTube hosts through the intercept server), so a
+  `youtube.com` SiteRule is optional. When both exist, the resolved semantics are:
+  an explicitly approved video/channel/playlist plays *even after* the youtube.com
+  budget is exhausted, while general browsing (home, search, channel pages) is
+  blocked once the budget runs out. `requestHandler` therefore routes YouTube hosts
+  to `handleYoutubeSite` **before** the generic `isBlockedSocialHost` check — don't
+  reorder those, or approved videos start showing the "Time's up" page (this was a
+  real reported bug).
+  Block pages are additionally gated on `isDocumentRequest`: returning HTML for a
+  script/fetch sub-resource breaks the page instead of blocking it, which would
+  break playback of approved videos whose assets live on youtube.com paths.
+  `agent-src/test/routing.test.js` locks all of this in — run `npm test` in
+  `agent-src/` after touching routing.
 - **YouTube whitelist** is enforced via a local TLS-intercepting reverse proxy
   (`agent-src/lib/interceptServer.js`) bound to `127.0.0.1:443`/`:80`, using a
   self-signed local CA (`agent-src/lib/certs.js`, real node-forge CA + signed leaf

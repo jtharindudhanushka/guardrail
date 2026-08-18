@@ -51,6 +51,7 @@ next-env.d.ts
 
 # agent
 /agent-src/node_modules
+/agent-src/test/.tmp-testdata
 
 # auto-generated CLI skill docs (from `prisma init`)
 /.claude/skills

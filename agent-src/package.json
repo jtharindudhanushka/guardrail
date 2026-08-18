@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "main": "agent.js",
+  "scripts": {
+    "test": "node test/routing.test.js"
+  },
   "dependencies": {
     "node-forge": "^1.3.1"
   }
