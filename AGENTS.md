@@ -171,6 +171,27 @@ directly — don't add a way to mark a device online without a real poll hitting
   same firewall rule by display name. If this list needs extending, keep it in sync
   in both routes.
 
+## Updating an installed agent
+
+Re-running the install command **without** `?code=` upgrades an existing install in
+place: `install.ps1` reads the current `config.json` and, if it already has an
+`apiKey`, preserves the device identity instead of overwriting it. A pairing code is
+only needed to enrol a brand-new device; with no existing install and no code, the
+script throws a clear message rather than half-installing.
+
+`config.json` lives in `%ProgramData%\Guardrail\` while code lives in `app/` beneath
+it, so agent files can be replaced freely without disturbing identity or rules.
+
+The installer must stop the running agent **before** downloading files, and the
+process match has to be on `agent.js` in the command line — the agent runs as
+`node.exe agent.js`, so matching on "Guardrail" finds nothing, leaves the old process
+holding port 443, and the freshly started one exits immediately without enforcing.
+
+There is deliberately no automatic self-update: it would need staged downloads,
+per-file validation, and a rollback path, because a failed update leaves a machine
+with hosts blocks applied and no agent to clear them. Revisit only if manual updates
+become frequent enough to justify carrying that.
+
 ## Remote uninstall on device deletion
 
 Deleting a device in the portal is also the remote-uninstall trigger. API keys are

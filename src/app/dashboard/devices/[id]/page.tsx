@@ -76,6 +76,19 @@ export default async function DeviceDetailPage({ params }: PageProps<"/dashboard
         </section>
       )}
 
+      {device.pairedAt && (
+        <section className="card-utility">
+          <p className="text-[17px] font-semibold mb-2" style={{ color: "var(--color-ink)" }}>
+            Update to the latest agent
+          </p>
+          <p className="text-[14px] mb-4" style={{ color: "var(--color-ink-muted-48)" }}>
+            Run this on the laptop to pull the newest version. No pairing code needed — it keeps this device
+            and all its rules.
+          </p>
+          <CommandBlock>irm &quot;{origin}/api/install&quot; | iex</CommandBlock>
+        </section>
+      )}
+
       <section>
         <h2 className="text-[21px] font-semibold tracking-[0.231px] mb-1" style={{ color: "var(--color-ink)" }}>
           Site time budgets
@@ -180,13 +193,21 @@ export default async function DeviceDetailPage({ params }: PageProps<"/dashboard
   );
 }
 
-function InstallCommand({ code, origin }: { code: string; origin: string }) {
+function CommandBlock({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="text-[14px] font-mono p-4 rounded-[8px] break-all"
       style={{ background: "var(--color-ink)", color: "#ffffff" }}
     >
-      irm &quot;{origin}/api/install?code={code}&quot; | iex
+      {children}
     </div>
+  );
+}
+
+function InstallCommand({ code, origin }: { code: string; origin: string }) {
+  return (
+    <CommandBlock>
+      irm &quot;{origin}/api/install?code={code}&quot; | iex
+    </CommandBlock>
   );
 }

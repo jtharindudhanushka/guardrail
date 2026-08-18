@@ -36,6 +36,17 @@ $appDir = "$dataDir\\app"
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 New-Item -ItemType Directory -Force -Path $appDir | Out-Null
 
+# Stop any running agent before touching its files or the hosts file. Matching on
+# agent.js is essential: the process runs as \`node.exe agent.js\`, so its command line
+# never contains "Guardrail" and a path-based match silently finds nothing - leaving
+# the old agent holding port 443 so the updated one can't start.
+Write-Host "Guardrail: stopping any previous agent..."
+Stop-ScheduledTask -TaskName "GuardrailAgent" -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -like "*agent.js*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+
 # Clear any stale redirects from a previous install. Without this, a hosts entry left
 # behind by a dead agent keeps sites unreachable (ERR_CONNECTION_REFUSED) even now.
 $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
@@ -93,14 +104,29 @@ Remove-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -ErrorAction SilentlyC
 New-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -Direction Outbound -Action Block -Protocol TCP -RemotePort 443,853 -RemoteAddress $dohIPs | Out-Null
 New-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443,853 -RemoteAddress $dohIPs | Out-Null
 
-$config = @{ portalUrl = "${origin}"; pairingCode = "${code}" } | ConvertTo-Json
-Set-Content -Path "$dataDir\\config.json" -Value $config
+# Keep the existing device identity when one is already installed, so re-running this
+# command upgrades to the latest agent without needing a fresh pairing code. A pairing
+# code is only ever required to enrol a brand-new device.
+$existing = $null
+if (Test-Path "$dataDir\\config.json") {
+  $existing = Get-Content "$dataDir\\config.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+}
 
-Write-Host "Guardrail: stopping any previous agent..."
-Stop-ScheduledTask -TaskName "GuardrailAgent" -ErrorAction SilentlyContinue
-Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -like "*Guardrail*" } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+if ($existing -and $existing.apiKey) {
+  Write-Host "Guardrail: updating existing install - keeping device ""$($existing.deviceName)"" and its rules."
+  $config = @{
+    portalUrl  = "${origin}"
+    deviceId   = $existing.deviceId
+    apiKey     = $existing.apiKey
+    deviceName = $existing.deviceName
+  } | ConvertTo-Json
+} elseif ("${code}") {
+  Write-Host "Guardrail: pairing this machine as a new device."
+  $config = @{ portalUrl = "${origin}"; pairingCode = "${code}" } | ConvertTo-Json
+} else {
+  throw "No existing Guardrail install found on this machine, and no pairing code was given. Add a device in the portal and run the install command shown on its page."
+}
+Set-Content -Path "$dataDir\\config.json" -Value $config
 
 # A wrapper .cmd avoids Task Scheduler quoting problems with paths that contain
 # spaces (e.g. C:\\Program Files\\nodejs) and captures stdout/stderr so a failed
@@ -136,16 +162,18 @@ Start-Process -FilePath $nodePath -ArgumentList "agent.js" -WorkingDirectory $ap
 
 Write-Host "Guardrail: verifying the agent started and paired..."
 $paired = $false
+$running = $null
 for ($i = 0; $i -lt 15; $i++) {
   Start-Sleep -Seconds 2
   $configNow = Get-Content "$dataDir\\config.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
-  if ($configNow.apiKey) { $paired = $true; break }
+  $paired = [bool]$configNow.apiKey
+  $running = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*agent.js*" }
+  if ($paired -and $running) { break }
 }
 
 $info = Get-ScheduledTaskInfo -TaskName "GuardrailAgent"
 $taskState = (Get-ScheduledTask -TaskName "GuardrailAgent").State
-$running = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -like "*agent.js*" }
 
 Write-Host ""
 if ($paired -and $running) {

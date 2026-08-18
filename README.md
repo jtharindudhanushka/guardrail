@@ -94,6 +94,21 @@ Controller for your own account.
    scheduled task so the agent starts automatically on every boot.
 3. Back in the portal, the device flips to "Online" within about 15–20 seconds.
 
+### Updating an installed agent
+
+Run the same command **without** the pairing code. It upgrades to the latest agent
+while keeping the device and all its rules:
+
+```powershell
+irm "https://your-deployment.vercel.app/api/install" | iex
+```
+
+### Removing a device
+
+Deleting a device from the portal is also a remote uninstall: the next time the agent
+checks in it finds itself unrecognised and removes Guardrail from that machine —
+blocks, certificate, firewall rule, startup task, and files.
+
 See [`AGENTS.md`](./AGENTS.md) for architecture details, the agent protocol, and
 known limitations if you're extending this project.
 
