@@ -47,7 +47,6 @@ ${fileDownloads}
 
 Write-Host "Guardrail: installing dependencies..."
 Push-Location $appDir
-node -e "" 2>$null
 & npm install --production --no-audit --no-fund
 Pop-Location
 
