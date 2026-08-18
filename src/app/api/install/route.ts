@@ -146,9 +146,14 @@ $triggerBoot = New-ScheduledTaskTrigger -AtStartup
 # of leaving the machine unenforced until the next reboot. If the agent is already
 # running, the new instance simply fails to bind port 443 and exits without touching
 # the hosts file, so repeated firing is harmless.
+#
+# The duration must be finite: [TimeSpan]::MaxValue builds a valid trigger object but
+# Task Scheduler rejects the resulting XML at registration time
+# ("value which is incorrectly formatted or out of range"). 10 years is effectively
+# indefinite here.
 $triggerWatchdog = New-ScheduledTaskTrigger -Once -At (Get-Date) \`
   -RepetitionInterval (New-TimeSpan -Minutes 5) \`
-  -RepetitionDuration ([TimeSpan]::MaxValue)
+  -RepetitionDuration (New-TimeSpan -Days 3650)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 # AllowStartIfOnBatteries / DontStopIfGoingOnBatteries are essential on a laptop:
 # by default Task Scheduler refuses to start a task on battery power and reports
@@ -160,7 +165,18 @@ $settings = New-ScheduledTaskSettingsSet \`
   -MultipleInstances IgnoreNew \`
   -RestartCount 999 \`
   -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot, $triggerWatchdog -Principal $principal -Settings $settings -Force | Out-Null
+# Registering the boot trigger matters more than the watchdog, and starting the agent
+# matters more than either. Never let a trigger problem abort the whole install.
+try {
+  Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot, $triggerWatchdog -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+} catch {
+  Write-Host "Guardrail: watchdog trigger rejected ($($_.Exception.Message.Split([Environment]::NewLine)[0])); registering boot-only."
+  try {
+    Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+  } catch {
+    Write-Host "Guardrail: could not register the startup task - the agent will still run now, but won't restart on boot."
+  }
+}
 
 # Start it now for real, independently of Task Scheduler, so a first run never
 # depends on trigger behaviour. The boot trigger above covers subsequent restarts.

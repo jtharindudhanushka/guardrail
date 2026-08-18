@@ -264,6 +264,15 @@ The agent runs via a `GuardrailAgent` scheduled task (SYSTEM, highest privileges
   service may not see the updated PATH. Always resolve and embed the full path.
 - `-ExecutionTimeLimit ([TimeSpan]::Zero)` — otherwise the task is killed after the
   default 3 days.
+- **Repetition duration must be finite.** `[TimeSpan]::MaxValue` produces a perfectly
+  valid trigger *object*, so it passes any check that only calls
+  `New-ScheduledTaskTrigger` — but `Register-ScheduledTask` then rejects the XML with
+  "value which is incorrectly formatted or out of range". Use a long finite span
+  (currently 3650 days). Validating trigger construction is not validating
+  registration; only an actual `Register-ScheduledTask` call proves it works.
+- Registration is wrapped in try/catch that falls back to boot-trigger-only, then to
+  no task at all. Starting the agent matters more than the task, and an install must
+  never abort before `Start-Process` over a trigger problem.
 
 Two log files exist on the device: `agent.log` (written by the agent itself) and
 `agent-stdout.log` (raw stdout/stderr from the wrapper — the place to look when the
