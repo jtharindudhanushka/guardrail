@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,21 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# sqlite dev db (leftover from local development before the Postgres switch)
+/dev.db
+/dev.db-journal
+/prisma/dev.db
+/prisma/dev.db-journal
+
+# agent
+/agent-src/node_modules
+
+# auto-generated CLI skill docs (from `prisma init`)
+/.claude/skills
+/.agents
+/.windsurf
+/skills-lock.json
+

@@ -1,0 +1,99 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  devices      Device[]
+}
+
+model Device {
+  id           String   @id @default(cuid())
+  name         String
+  apiKey       String   @unique
+  pairingCode  String?  @unique
+  pairedAt     DateTime?
+  lastSeenAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  ownerId      String
+  owner        User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  siteRules    SiteRule[]
+  youtubeRules YoutubeRule[]
+  bypasses     BypassCode[]
+  usageStates  UsageState[]
+}
+
+// Per-site daily time budget, e.g. instagram.com -> 20 minutes/day
+model SiteRule {
+  id         String   @id @default(cuid())
+  domain     String
+  dailyLimitMinutes Int
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, domain])
+}
+
+// YouTube whitelist entries - can be a specific video, a channel, or a playlist
+enum YoutubeRuleType {
+  VIDEO
+  CHANNEL
+  PLAYLIST
+}
+
+model YoutubeRule {
+  id         String          @id @default(cuid())
+  type       YoutubeRuleType
+  value      String          // video ID, channel ID/handle, or playlist ID
+  label      String?         // optional friendly name shown in portal
+  createdAt  DateTime        @default(now())
+
+  deviceId   String
+  device     Device          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, type, value])
+}
+
+// Time-boxed unlock issued by the gatekeeper (Controller)
+model BypassCode {
+  id         String   @id @default(cuid())
+  domain     String?  // null = applies to all social sites
+  minutes    Int
+  startsAt   DateTime @default(now())
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+// Tracks elapsed minutes per site per local day, reported by the agent (no URL/content history kept)
+model UsageState {
+  id         String   @id @default(cuid())
+  domain     String
+  dateKey    String   // YYYY-MM-DD in device local time, resets tracking at midnight
+  elapsedSeconds Int  @default(0)
+  updatedAt  DateTime @updatedAt
+
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, domain, dateKey])
+}

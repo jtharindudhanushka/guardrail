@@ -1,26 +1,157 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Brand & accent */
+  --color-primary: #0066cc;
+  --color-primary-focus: #0071e3;
+  --color-primary-on-dark: #2997ff;
+
+  /* Surface */
+  --color-canvas: #ffffff;
+  --color-canvas-parchment: #f5f5f7;
+  --color-surface-pearl: #fafafc;
+  --color-surface-tile-1: #272729;
+  --color-surface-tile-2: #2a2a2c;
+  --color-surface-tile-3: #252527;
+  --color-surface-black: #000000;
+  --color-surface-chip-translucent: rgba(210, 210, 215, 0.64);
+
+  /* Text */
+  --color-ink: #1d1d1f;
+  --color-body: #1d1d1f;
+  --color-body-on-dark: #ffffff;
+  --color-body-muted: #cccccc;
+  --color-ink-muted-80: #333333;
+  --color-ink-muted-48: #7a7a7a;
+
+  /* Hairlines */
+  --color-divider-soft: rgba(0, 0, 0, 0.04);
+  --color-hairline: #e0e0e0;
+
+  --font-display: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-text: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-primary: var(--color-primary);
+  --color-primary-focus: var(--color-primary-focus);
+  --color-primary-on-dark: var(--color-primary-on-dark);
+  --color-canvas: var(--color-canvas);
+  --color-canvas-parchment: var(--color-canvas-parchment);
+  --color-surface-pearl: var(--color-surface-pearl);
+  --color-surface-tile-1: var(--color-surface-tile-1);
+  --color-surface-tile-2: var(--color-surface-tile-2);
+  --color-surface-tile-3: var(--color-surface-tile-3);
+  --color-surface-black: var(--color-surface-black);
+  --color-ink: var(--color-ink);
+  --color-body: var(--color-body);
+  --color-body-on-dark: var(--color-body-on-dark);
+  --color-body-muted: var(--color-body-muted);
+  --color-ink-muted-80: var(--color-ink-muted-80);
+  --color-ink-muted-48: var(--color-ink-muted-48);
+  --color-hairline: var(--color-hairline);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 18px;
+  --radius-pill: 9999px;
+
+  --font-display: var(--font-display);
+  --font-text: var(--font-text);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-body);
+  font-family: var(--font-text);
+  font-size: 17px;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 400;
+  border-radius: 9999px;
+  padding: 11px 22px;
+  transition: transform 0.1s ease;
+}
+.btn-primary:active {
+  transform: scale(0.95);
+}
+.btn-primary:focus-visible {
+  outline: 2px solid var(--color-primary-focus);
+  outline-offset: 2px;
+}
+
+.btn-secondary-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 17px;
+  border: 1px solid var(--color-primary);
+  border-radius: 9999px;
+  padding: 11px 22px;
+  transition: transform 0.1s ease;
+}
+.btn-secondary-pill:active {
+  transform: scale(0.95);
+}
+
+.btn-dark-utility {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-ink);
+  color: #ffffff;
+  font-size: 14px;
+  letter-spacing: -0.224px;
+  border-radius: 8px;
+  padding: 8px 15px;
+  transition: transform 0.1s ease;
+}
+.btn-dark-utility:active {
+  transform: scale(0.95);
+}
+
+.card-utility {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: 18px;
+  padding: 24px;
+}
+
+.input-pill {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-size: 17px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 9999px;
+  padding: 12px 20px;
+  height: 44px;
+  width: 100%;
+}
+.input-pill:focus {
+  outline: 2px solid var(--color-primary-focus);
+  outline-offset: 1px;
+}
+
+.text-link {
+  color: var(--color-primary);
+}
+.text-link-on-dark {
+  color: var(--color-primary-on-dark);
 }
