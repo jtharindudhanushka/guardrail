@@ -22,9 +22,16 @@ $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
 
 Write-Host "Guardrail: removing hosts file entries..."
 if (Test-Path $hostsPath) {
-  $content = Get-Content $hostsPath -Raw
-  $cleaned = $content -replace '(?s)\\r?\\n# GUARDRAIL-START.*?# GUARDRAIL-END\\r?\\n?', "\`n"
-  Set-Content -Path $hostsPath -Value $cleaned -NoNewline
+  try {
+    $content = [System.IO.File]::ReadAllText($hostsPath)
+    if ($content -match "GUARDRAIL-START") {
+      $cleaned = [regex]::Replace($content, "(?s)\\r?\\n# GUARDRAIL-START.*?# GUARDRAIL-END\\r?\\n?", "\`r\`n")
+      [System.IO.File]::SetAttributes($hostsPath, [System.IO.FileAttributes]::Normal)
+      [System.IO.File]::WriteAllText($hostsPath, $cleaned, [System.Text.Encoding]::ASCII)
+    }
+  } catch {
+    Write-Host "Guardrail: warning - could not clean hosts file: $_"
+  }
 }
 
 Write-Host "Guardrail: removing the trusted local certificate..."

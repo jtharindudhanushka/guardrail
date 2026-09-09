@@ -52,11 +52,16 @@ Start-Sleep -Seconds 2
 # behind by a dead agent keeps sites unreachable (ERR_CONNECTION_REFUSED) even now.
 $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
 if (Test-Path $hostsPath) {
-  $hostsContent = Get-Content $hostsPath -Raw
-  if ($hostsContent -match "GUARDRAIL-START") {
-    Write-Host "Guardrail: clearing stale hosts entries from a previous install..."
-    $cleanedHosts = [regex]::Replace($hostsContent, "(?s)\\r?\\n# GUARDRAIL-START.*?# GUARDRAIL-END\\r?\\n?", "\`r\`n")
-    Set-Content -Path $hostsPath -Value $cleanedHosts -NoNewline
+  try {
+    $hostsContent = [System.IO.File]::ReadAllText($hostsPath)
+    if ($hostsContent -match "GUARDRAIL-START") {
+      Write-Host "Guardrail: clearing stale hosts entries from a previous install..."
+      $cleanedHosts = [regex]::Replace($hostsContent, "(?s)\\r?\\n# GUARDRAIL-START.*?# GUARDRAIL-END\\r?\\n?", "\`r\`n")
+      [System.IO.File]::SetAttributes($hostsPath, [System.IO.FileAttributes]::Normal)
+      [System.IO.File]::WriteAllText($hostsPath, $cleanedHosts, [System.Text.Encoding]::ASCII)
+    }
+  } catch {
+    Write-Host "Guardrail: warning - could not clean hosts file: $_"
   }
 }
 
