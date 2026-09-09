@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticateAgent } from "@/lib/agentAuth";
 import type { SiteRule, YoutubeRule, BypassCode } from "@/generated/prisma/client";
+import agentPackage from "../../../../../agent-src/package.json";
 
 export async function GET(req: NextRequest) {
   const device = await authenticateAgent(req);
@@ -22,6 +23,8 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     deviceName: device.name,
+    agentVersion: agentPackage.version || "1.1.0",
+    customBlockHtml: device.customBlockHtml ?? null,
     serverTime: new Date().toISOString(),
     siteRules: siteRules.map((r: SiteRule) => ({ domain: r.domain, dailyLimitMinutes: r.dailyLimitMinutes })),
     youtubeRules: youtubeRules.map((r: YoutubeRule) => ({ type: r.type, value: r.value })),

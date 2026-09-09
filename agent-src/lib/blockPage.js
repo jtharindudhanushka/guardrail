@@ -6,7 +6,26 @@ const GLYPHS = {
 };
 
 function blockPageHtml(title, message, options = {}) {
-  const { detail = null, showResetCountdown = false, icon = "clock" } = options;
+  const {
+    detail = null,
+    domain = null,
+    showResetCountdown = false,
+    icon = "clock",
+    customHtml = null,
+  } = options;
+
+  if (customHtml && typeof customHtml === "string" && customHtml.trim().length > 0) {
+    const activeDomain = domain || detail || "";
+    const countdownSnippet = `<span id="countdown">—</span><script>(function(){var el=document.getElementById("countdown");function tick(){var now=new Date();var midnight=new Date(now);midnight.setHours(24,0,0,0);var diff=midnight-now;var h=Math.floor(diff/3600000);var m=Math.floor((diff%3600000)/60000);var s=Math.floor((diff%60000)/1000);if(el)el.textContent=h+"h "+String(m).padStart(2,"0")+"m "+String(s).padStart(2,"0")+"s";}tick();setInterval(tick,1000);})();</script>`;
+
+    return customHtml
+      .replace(/{{title}}/g, title)
+      .replace(/{{message}}/g, message)
+      .replace(/{{domain}}/g, activeDomain)
+      .replace(/{{detail}}/g, detail || activeDomain)
+      .replace(/{{resetCountdown}}/g, countdownSnippet);
+  }
+
   const glyph = GLYPHS[icon] || GLYPHS.clock;
 
   const countdown = showResetCountdown

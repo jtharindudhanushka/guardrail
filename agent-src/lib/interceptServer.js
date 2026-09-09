@@ -15,12 +15,16 @@ const YOUTUBE_API_HOSTS = new Set(["youtubei.googleapis.com"]);
 
 let currentYoutubeRules = [];
 let currentBlockedDomains = new Set();
+let currentCustomBlockHtml = null;
 
 function setYoutubeRules(rules) {
   currentYoutubeRules = rules;
 }
 function setBlockedDomains(domains) {
   currentBlockedDomains = new Set(domains);
+}
+function setCustomBlockHtml(html) {
+  currentCustomBlockHtml = html || null;
 }
 
 function isBlockedSocialHost(hostname) {
@@ -101,7 +105,9 @@ async function handleYoutubeSite(req, res, hostname) {
       res.end(
         blockPageHtml("Not on the whitelist", "Only approved videos, channels, and playlists can play.", {
           detail: `youtube.com/watch?v=${videoId}`,
+          domain: "youtube.com",
           icon: "play",
+          customHtml: currentCustomBlockHtml,
         })
       );
       return;
@@ -118,7 +124,9 @@ async function handleYoutubeSite(req, res, hostname) {
     res.end(
       blockPageHtml("Time's up for today", "You can still open videos that have been approved.", {
         detail: hostname,
+        domain: hostname,
         showResetCountdown: true,
+        customHtml: currentCustomBlockHtml,
       })
     );
     return;
@@ -202,7 +210,9 @@ function requestHandler(req, res) {
     res.end(
       blockPageHtml("Time's up for today", "You've used your daily time for this site.", {
         detail: hostname,
+        domain: hostname,
         showResetCountdown: true,
+        customHtml: currentCustomBlockHtml,
       })
     );
     return;
@@ -264,4 +274,4 @@ async function start() {
 }
 
 // requestHandler is exported for the routing tests in test/routing.test.js.
-module.exports = { start, setYoutubeRules, setBlockedDomains, requestHandler };
+module.exports = { start, setYoutubeRules, setBlockedDomains, setCustomBlockHtml, requestHandler };

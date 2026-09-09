@@ -141,6 +141,20 @@ export async function revokeBypass(deviceId: string, bypassId: string) {
   revalidatePath(`/dashboard/devices/${deviceId}`);
 }
 
+export async function updateCustomBlockPage(deviceId: string, formData: FormData) {
+  const userId = await requireUserId();
+  await assertOwnsDevice(userId, deviceId);
+  const raw = formData.get("customBlockHtml");
+  const customBlockHtml = typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+
+  await prisma.device.update({
+    where: { id: deviceId },
+    data: { customBlockHtml },
+  });
+
+  revalidatePath(`/dashboard/devices/${deviceId}`);
+}
+
 // Accepts full YouTube URLs or bare IDs/handles and pulls out the identifier we match on.
 function extractYoutubeIdentifier(input: string, type: "VIDEO" | "CHANNEL" | "PLAYLIST"): string {
   try {

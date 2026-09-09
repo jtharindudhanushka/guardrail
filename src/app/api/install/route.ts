@@ -15,6 +15,7 @@ const AGENT_FILES = [
   "lib/blockPage.js",
   "lib/interceptServer.js",
   "lib/selfUninstall.js",
+  "lib/updater.js",
 ];
 
 export async function GET(req: NextRequest) {

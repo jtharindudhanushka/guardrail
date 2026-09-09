@@ -198,24 +198,32 @@ instance fails to bind port 443 and exits without touching the hosts file.
 
 ## Updating an installed agent
 
-Re-running the install command **without** `?code=` upgrades an existing install in
-place: `install.ps1` reads the current `config.json` and, if it already has an
-`apiKey`, preserves the device identity instead of overwriting it. A pairing code is
-only needed to enrol a brand-new device; with no existing install and no code, the
-script throws a clear message rather than half-installing.
+## Auto-updating the installed agent
 
-`config.json` lives in `%ProgramData%\Guardrail\` while code lives in `app/` beneath
-it, so agent files can be replaced freely without disturbing identity or rules.
+The agent includes a safe, zero-touch auto-updater (`agent-src/lib/updater.js`).
+Every 15-second heartbeat poll to `GET /api/agent/rules`, the portal returns `agentVersion`
+and `customBlockHtml`. If the remote version is newer than the local agent version:
+1. The agent downloads the file manifest from `GET /api/agent-files/manifest`.
+2. Downloads files into `C:\ProgramData\Guardrail\staging\`.
+3. Pre-verifies syntax of all `.js` files via Node's `vm.Script` before touching `app/`.
+4. Spawns a detached PowerShell helper (`SystemRoot` cwd) that waits for the agent to
+   exit (releasing port 443), backs up current `app/` to `app.prev/`, moves `staging/`
+   into `app/`, and restarts the agent.
+5. Performs a healthcheck after restart: if the new agent fails to stay running or bind
+   port 443, it automatically rolls back to `app.prev/` and restarts the previous agent,
+   ensuring the machine is never left with broken internet redirects.
 
-The installer must stop the running agent **before** downloading files, and the
-process match has to be on `agent.js` in the command line — the agent runs as
-`node.exe agent.js`, so matching on "Guardrail" finds nothing, leaves the old process
-holding port 443, and the freshly started one exits immediately without enforcing.
+Manual updates can also still be done at any time by re-running the install command
+**without** `?code=` (`irm "<portal-url>/api/install" | iex`).
 
-There is deliberately no automatic self-update: it would need staged downloads,
-per-file validation, and a rollback path, because a failed update leaves a machine
-with hosts blocks applied and no agent to clear them. Revisit only if manual updates
-become frequent enough to justify carrying that.
+## Custom block webpage
+
+The Controller can provide custom HTML/CSS/JavaScript in the portal device dashboard.
+When set (`customBlockHtml`), the intercept server replaces the default Apple-styled
+block card with the custom page, interpolating template tags:
+`{{title}}`, `{{message}}`, `{{domain}}`, `{{detail}}`, and `{{resetCountdown}}`. If
+unset or cleared, the intercept server gracefully falls back to the clean built-in
+block card.
 
 ## Remote uninstall on device deletion
 

@@ -13,6 +13,7 @@ import {
   RevokeBypassButton,
   RegenerateCodeButton,
   DeleteDeviceButton,
+  CustomBlockPageEditor,
 } from "./forms";
 
 const ONLINE_WINDOW_MS = 45_000;
@@ -174,6 +175,16 @@ export default async function DeviceDetailPage({ params }: PageProps<"/dashboard
             </div>
           )}
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-[21px] font-semibold tracking-[0.231px] mb-1" style={{ color: "var(--color-ink)" }}>
+          Custom block page
+        </h2>
+        <p className="text-[14px] mb-4" style={{ color: "var(--color-ink-muted-48)" }}>
+          Design a custom HTML, CSS, and JavaScript page displayed when a website is blocked or YouTube video is not whitelisted.
+        </p>
+        <CustomBlockPageEditor deviceId={device.id} initialHtml={device.customBlockHtml} />
       </section>
 
       <section>

@@ -5,6 +5,7 @@ const portalClient = require("./lib/portalClient");
 const interceptServer = require("./lib/interceptServer");
 const { ensureCA } = require("./lib/certs");
 const { selfUninstall } = require("./lib/selfUninstall");
+const updater = require("./lib/updater");
 const { log } = require("./lib/log");
 
 const POLL_INTERVAL_MS = 15_000;
@@ -69,10 +70,17 @@ async function tick(config) {
 
   interceptServer.setBlockedDomains(blockedDomains);
   interceptServer.setYoutubeRules(rules.youtubeRules);
+  interceptServer.setCustomBlockHtml(rules.customBlockHtml || null);
 
   await portalClient.reportUsage(config.portalUrl, config.apiKey, usageReport).catch((e) => log("usage report failed:", e.message));
 
   log(`tick ok - blocked: [${blockedDomains.join(", ") || "none"}], youtube rules: ${rules.youtubeRules.length}`);
+
+  if (rules.agentVersion && updater.shouldUpdate(rules.agentVersion)) {
+    await updater.checkAndApply(config.portalUrl, rules.agentVersion, () => {
+      ownsBlocks = false;
+    });
+  }
 }
 
 // Leaving hosts entries behind while nothing is listening on 127.0.0.1 makes every

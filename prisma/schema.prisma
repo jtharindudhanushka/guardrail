@@ -26,6 +26,7 @@ model Device {
   pairedAt     DateTime?
   lastSeenAt   DateTime?
   createdAt    DateTime @default(now())
+  customBlockHtml String?
 
   ownerId      String
   owner        User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)

@@ -76,5 +76,18 @@ const PASSTHROUGH = "DNS resolution failed"; // proxyPassthrough reached, then s
   assert(r.body.includes(PASSTHROUGH), "browsing allowed when under budget");
   console.log("PASS  browsing allowed while under budget");
 
+  // Custom block HTML tests
+  interceptServer.setBlockedDomains(["instagram.com"]);
+  interceptServer.setCustomBlockHtml("<div class='custom'>Blocked {{domain}} - {{title}}</div>");
+  r = await run(makeReq({ host: "instagram.com", url: "/" }));
+  assert(r.body.includes("<div class='custom'>Blocked instagram.com - Time's up for today</div>"), "custom block page renders with interpolated variables");
+  console.log("PASS  custom block page renders with interpolated variables");
+
+  // Clearing custom block HTML restores default template
+  interceptServer.setCustomBlockHtml(null);
+  r = await run(makeReq({ host: "instagram.com", url: "/" }));
+  assert(r.body.includes("Time's up for today") && r.body.includes("glyph"), "clearing custom block HTML restores default Apple-style page");
+  console.log("PASS  clearing custom block HTML restores default page");
+
   console.log("\nAll routing tests passed.");
 })();
