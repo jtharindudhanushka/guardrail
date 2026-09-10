@@ -76,6 +76,53 @@ const PASSTHROUGH = "DNS resolution failed"; // proxyPassthrough reached, then s
   assert(r.body.includes(PASSTHROUGH), "browsing allowed when under budget");
   console.log("PASS  browsing allowed while under budget");
 
+  // Playlist Whitelist Tests
+  interceptServer.setBlockedDomains(["youtube.com"]);
+  interceptServer.setYoutubeRules([{ type: "PLAYLIST", value: "PLAPPROVED123" }]);
+
+  // 1. Full page video load with whitelisted playlist
+  r = await run(makeReq({ host: "www.youtube.com", url: "/watch?v=RANDOMVID&list=PLAPPROVED123" }));
+  assert(r.body.includes(PASSTHROUGH), "video with whitelisted playlist must play even when budget is exhausted");
+  console.log("PASS  video with whitelisted playlist plays despite exhausted youtube.com budget");
+
+  // 2. Full page video load with non-whitelisted playlist
+  r = await run(makeReq({ host: "www.youtube.com", url: "/watch?v=RANDOMVID&list=PLOTHER" }));
+  assert(r.body.includes("Not on the whitelist"), "video with non-whitelisted playlist must be blocked");
+  console.log("PASS  video with non-whitelisted playlist is blocked");
+
+  // 3. Whitelisted playlist page itself allowed when over budget
+  r = await run(makeReq({ host: "www.youtube.com", url: "/playlist?list=PLAPPROVED123" }));
+  assert(r.body.includes(PASSTHROUGH), "whitelisted playlist page allowed despite exhausted youtube.com budget");
+  console.log("PASS  whitelisted playlist page allowed despite exhausted budget");
+
+  // 4. Non-whitelisted playlist page blocked when over budget
+  r = await run(makeReq({ host: "www.youtube.com", url: "/playlist?list=PLOTHER" }));
+  assert(r.body.includes("Time&#39;s up") || r.body.includes("Time's up"), "non-whitelisted playlist page blocked when over budget");
+  console.log("PASS  non-whitelisted playlist page blocked when over budget");
+
+  // 5. Player API calls with playlistId (SPA navigation)
+  function makeApiReq({ host = "www.youtube.com", url = "/youtubei/v1/player", body }) {
+    const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
+    return {
+      headers: { host, "content-type": "application/json" },
+      url,
+      method: "POST",
+      on: (evt, fn) => {
+        if (evt === "data") setTimeout(() => fn(Buffer.from(bodyStr)), 0);
+        if (evt === "end") setTimeout(() => fn(), 5);
+      },
+      pipe: () => {},
+    };
+  }
+
+  r = await run(makeApiReq({ body: { videoId: "RANDOMVID", playlistId: "PLAPPROVED123" } }));
+  assert(r.body.includes(PASSTHROUGH), "player API call with whitelisted playlistId must pass through");
+  console.log("PASS  player API call with whitelisted playlistId passes through");
+
+  r = await run(makeApiReq({ body: { videoId: "RANDOMVID", playlistId: "PLOTHER" } }));
+  assert(r.status === 403 && r.body.includes("not_whitelisted"), "player API call with non-whitelisted playlistId must return 403");
+  console.log("PASS  player API call with non-whitelisted playlistId returns 403");
+
   // Custom block HTML tests
   interceptServer.setBlockedDomains(["instagram.com"]);
   interceptServer.setCustomBlockHtml("<div class='custom'>Blocked {{domain}} - {{title}}</div>");
@@ -91,3 +138,4 @@ const PASSTHROUGH = "DNS resolution failed"; // proxyPassthrough reached, then s
 
   console.log("\nAll routing tests passed.");
 })();
+

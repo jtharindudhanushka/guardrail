@@ -155,29 +155,62 @@ export async function updateCustomBlockPage(deviceId: string, formData: FormData
   revalidatePath(`/dashboard/devices/${deviceId}`);
 }
 
-// Accepts full YouTube URLs or bare IDs/handles and pulls out the identifier we match on.
-function extractYoutubeIdentifier(input: string, type: "VIDEO" | "CHANNEL" | "PLAYLIST"): string {
+// Accepts full YouTube URLs, protocol-less URLs, or bare IDs/handles and pulls out the identifier we match on.
+function extractYoutubeIdentifier(rawInput: string, type: "VIDEO" | "CHANNEL" | "PLAYLIST"): string {
+  const input = rawInput.trim();
+  if (!input) return "";
+
+  // Normalize protocol if omitted (e.g. "youtube.com/playlist?list=..." or "www.youtube.com/watch?v=...")
+  let normalized = input;
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(normalized)) {
+    if (normalized.includes("youtube.com") || normalized.includes("youtu.be") || normalized.includes("/")) {
+      normalized = `https://${normalized}`;
+    }
+  }
+
   try {
-    const url = new URL(input);
+    const url = new URL(normalized);
     if (type === "VIDEO") {
-      if (url.hostname.includes("youtu.be")) return url.pathname.slice(1);
+      if (url.hostname.includes("youtu.be")) return url.pathname.replace(/^\/+/, "");
       const v = url.searchParams.get("v");
       if (v) return v;
-      const shorts = url.pathname.match(/\/shorts\/([^/]+)/);
+      const shorts = url.pathname.match(/\/shorts\/([^/?]+)/);
       if (shorts) return shorts[1];
+      const embed = url.pathname.match(/\/embed\/([^/?]+)/);
+      if (embed) return embed[1];
     }
     if (type === "PLAYLIST") {
       const list = url.searchParams.get("list");
       if (list) return list;
     }
     if (type === "CHANNEL") {
-      const channelMatch = url.pathname.match(/\/channel\/([^/]+)/);
+      const channelMatch = url.pathname.match(/\/channel\/([^/?]+)/);
       if (channelMatch) return channelMatch[1];
-      const handleMatch = url.pathname.match(/\/@([^/]+)/);
+      const handleMatch = url.pathname.match(/\/@([^/?]+)/);
       if (handleMatch) return `@${handleMatch[1]}`;
     }
-    return input;
   } catch {
-    return input; // not a URL, treat as a raw ID/handle already
+    // URL parsing failed, fall through to regex fallbacks
   }
+
+  // Regex fallbacks for cases like bare query strings or unusual formats
+  if (type === "PLAYLIST") {
+    const listMatch = input.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+    if (listMatch) return listMatch[1];
+    const bareList = input.match(/^list=([a-zA-Z0-9_-]+)/);
+    if (bareList) return bareList[1];
+  }
+  if (type === "VIDEO") {
+    const vMatch = input.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+    if (vMatch) return vMatch[1];
+    const shortsMatch = input.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
+    if (shortsMatch) return shortsMatch[1];
+  }
+  if (type === "CHANNEL") {
+    const handleMatch = input.match(/@([a-zA-Z0-9_.-]+)/);
+    if (handleMatch) return `@${handleMatch[1]}`;
+  }
+
+  return input;
 }
+

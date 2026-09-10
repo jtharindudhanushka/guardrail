@@ -25,12 +25,24 @@ export async function GET(req: NextRequest) {
 
   const fileDownloads = AGENT_FILES.map(
     (f) =>
-      `New-Item -ItemType Directory -Force -Path (Split-Path "$appDir\\${f}") | Out-Null\nInvoke-WebRequest -Uri "${origin}/api/agent-files/${f}" -OutFile "$appDir\\${f}"`
+      `New-Item -ItemType Directory -Force -Path (Split-Path "$appDir\\${f}") | Out-Null\nInvoke-WebRequest -UseBasicParsing -Uri "${origin}/api/agent-files/${f}" -OutFile "$appDir\\${f}"`
   ).join("\n");
 
   const script = `#Requires -RunAsAdministrator
 $ErrorActionPreference = "Stop"
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+$ProgressPreference = 'SilentlyContinue'
+
+# Explicit admin check (since iex ignores #Requires directives)
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+  Write-Error "Guardrail requires Administrator privileges. Please open PowerShell as Administrator and run this command again."
+  exit 1
+}
+
+# Ensure TLS 1.2+ is active on older PowerShell 5.1 environments
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls13 } catch {}
 
 $dataDir = "$env:ProgramData\\Guardrail"
 $appDir = "$dataDir\\app"
@@ -47,6 +59,19 @@ Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyC
   Where-Object { $_.CommandLine -like "*agent.js*" } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
+
+# Check if port 443 is still occupied
+$port443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
+if ($port443) {
+  $proc = Get-Process -Id $port443.OwningProcess -ErrorAction SilentlyContinue
+  if ($proc -and $proc.Name -eq "node") {
+    Write-Host "Guardrail: stopping lingering node process on port 443..."
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+  } elseif ($proc) {
+    Write-Host "Guardrail: warning - port 443 is currently in use by '$($proc.Name)' (PID $($proc.Id))."
+  }
+}
 
 # Clear any stale redirects from a previous install. Without this, a hosts entry left
 # behind by a dead agent keeps sites unreachable (ERR_CONNECTION_REFUSED) even now.
@@ -81,12 +106,16 @@ if (-not $node) {
 }
 Write-Host "Guardrail: using node at $nodePath"
 
+$npm = Get-Command npm -ErrorAction SilentlyContinue
+$npmPath = if ($npm) { $npm.Source } else { Join-Path (Split-Path $nodePath) "npm.cmd" }
+if (-not (Test-Path $npmPath)) { $npmPath = "npm" }
+
 Write-Host "Guardrail: downloading agent..."
 ${fileDownloads}
 
 Write-Host "Guardrail: installing dependencies..."
 Push-Location $appDir
-& npm install --production --no-audit --no-fund
+& $npmPath install --production --no-audit --no-fund
 Pop-Location
 
 Write-Host "Guardrail: generating local certificate authority..."
@@ -110,15 +139,18 @@ Remove-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -ErrorAction SilentlyC
 New-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -Direction Outbound -Action Block -Protocol TCP -RemotePort 443,853 -RemoteAddress $dohIPs | Out-Null
 New-NetFirewallRule -DisplayName "Guardrail-Block-DoH" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443,853 -RemoteAddress $dohIPs | Out-Null
 
-# Keep the existing device identity when one is already installed, so re-running this
-# command upgrades to the latest agent without needing a fresh pairing code. A pairing
-# code is only ever required to enrol a brand-new device.
+# If a pairing code is explicitly provided in the command, always use it to pair
+# or re-pair this machine. Only when no code is passed do we retain an existing
+# device identity (the seamless upgrade path).
 $existing = $null
 if (Test-Path "$dataDir\\config.json") {
   $existing = Get-Content "$dataDir\\config.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
 }
 
-if ($existing -and $existing.apiKey) {
+if ("${code}") {
+  Write-Host "Guardrail: pairing this machine as a new device with code ${code}."
+  $config = @{ portalUrl = "${origin}"; pairingCode = "${code}" } | ConvertTo-Json
+} elseif ($existing -and $existing.apiKey) {
   Write-Host "Guardrail: updating existing install - keeping device ""$($existing.deviceName)"" and its rules."
   $config = @{
     portalUrl  = "${origin}"
@@ -126,9 +158,6 @@ if ($existing -and $existing.apiKey) {
     apiKey     = $existing.apiKey
     deviceName = $existing.deviceName
   } | ConvertTo-Json
-} elseif ("${code}") {
-  Write-Host "Guardrail: pairing this machine as a new device."
-  $config = @{ portalUrl = "${origin}"; pairingCode = "${code}" } | ConvertTo-Json
 } else {
   throw "No existing Guardrail install found on this machine, and no pairing code was given. Add a device in the portal and run the install command shown on its page."
 }
@@ -152,18 +181,10 @@ $triggerBoot = New-ScheduledTaskTrigger -AtStartup
 # of leaving the machine unenforced until the next reboot. If the agent is already
 # running, the new instance simply fails to bind port 443 and exits without touching
 # the hosts file, so repeated firing is harmless.
-#
-# The duration must be finite: [TimeSpan]::MaxValue builds a valid trigger object but
-# Task Scheduler rejects the resulting XML at registration time
-# ("value which is incorrectly formatted or out of range"). 10 years is effectively
-# indefinite here.
 $triggerWatchdog = New-ScheduledTaskTrigger -Once -At (Get-Date) \`
   -RepetitionInterval (New-TimeSpan -Minutes 5) \`
   -RepetitionDuration (New-TimeSpan -Days 3650)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-# AllowStartIfOnBatteries / DontStopIfGoingOnBatteries are essential on a laptop:
-# by default Task Scheduler refuses to start a task on battery power and reports
-# no error, which looks exactly like the task silently never running.
 $settings = New-ScheduledTaskSettingsSet \`
   -AllowStartIfOnBatteries \`
   -DontStopIfGoingOnBatteries \`
@@ -171,8 +192,7 @@ $settings = New-ScheduledTaskSettingsSet \`
   -MultipleInstances IgnoreNew \`
   -RestartCount 999 \`
   -RestartInterval (New-TimeSpan -Minutes 1)
-# Registering the boot trigger matters more than the watchdog, and starting the agent
-# matters more than either. Never let a trigger problem abort the whole install.
+
 try {
   Register-ScheduledTask -TaskName "GuardrailAgent" -Action $action -Trigger $triggerBoot, $triggerWatchdog -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
 } catch {
@@ -184,10 +204,10 @@ try {
   }
 }
 
-# Start it now for real, independently of Task Scheduler, so a first run never
-# depends on trigger behaviour. The boot trigger above covers subsequent restarts.
+# Start it now for real via the wrapper so output is captured into agent-stdout.log
 Write-Host "Guardrail: starting the agent..."
-Start-Process -FilePath $nodePath -ArgumentList "agent.js" -WorkingDirectory $appDir -WindowStyle Hidden
+if (Test-Path "$dataDir\\agent-stdout.log") { Clear-Content "$dataDir\\agent-stdout.log" -ErrorAction SilentlyContinue }
+Start-Process -FilePath $cmdExe -ArgumentList "/c ""$runnerPath""" -WorkingDirectory $appDir -WindowStyle Hidden
 
 Write-Host "Guardrail: verifying the agent started and paired..."
 $paired = $false
@@ -216,9 +236,13 @@ if ($paired -and $running) {
   Write-Host "  boot task state:   $taskState"
   Write-Host "  last task result:  $($info.LastTaskResult)"
   Write-Host ""
-  Write-Host "Check the logs:"
-  Write-Host "  Get-Content ""$dataDir\\agent.log"" -Tail 30"
-  Write-Host "  Get-Content ""$dataDir\\agent-stdout.log"" -Tail 30"
+  Write-Host "Recent agent output:"
+  if (Test-Path "$dataDir\\agent-stdout.log") {
+    Get-Content "$dataDir\\agent-stdout.log" -Tail 15
+  }
+  if (Test-Path "$dataDir\\agent.log") {
+    Get-Content "$dataDir\\agent.log" -Tail 15
+  }
 }
 `;
 

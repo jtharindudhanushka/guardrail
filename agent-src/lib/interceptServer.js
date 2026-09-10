@@ -117,6 +117,16 @@ async function handleYoutubeSite(req, res, hostname) {
     return;
   }
 
+  // If this is a whitelisted playlist page (/playlist?list=PL...), allow it through even if over budget
+  if (url.pathname === "/playlist") {
+    const listId = url.searchParams.get("list");
+    const isApprovedPlaylist = listId && currentYoutubeRules.some((r) => r.type === "PLAYLIST" && r.value === listId);
+    if (isApprovedPlaylist) {
+      proxyPassthrough(req, res, hostname);
+      return;
+    }
+  }
+
   // Everything that isn't approved playback (home, search, channel browsing) still
   // respects the daily time budget.
   if (isBlockedSocialHost(hostname) && isDocumentRequest(req)) {
@@ -149,14 +159,19 @@ async function handleYoutubeApi(req, res, hostname) {
   req.on("data", (c) => (body += c));
   req.on("end", async () => {
     let videoId = null;
+    let playlistId = url.searchParams.get("list") || url.searchParams.get("playlistId") || null;
     try {
-      videoId = JSON.parse(body).videoId || null;
+      const parsed = JSON.parse(body);
+      videoId = parsed.videoId || null;
+      if (parsed.playlistId) playlistId = parsed.playlistId;
     } catch {
       // non-JSON body, fall through and allow
     }
 
     if (videoId) {
-      const allowed = await isAllowed("/watch", new URLSearchParams({ v: videoId }), currentYoutubeRules);
+      const searchParams = new URLSearchParams({ v: videoId });
+      if (playlistId) searchParams.set("list", playlistId);
+      const allowed = await isAllowed("/watch", searchParams, currentYoutubeRules);
       if (!allowed) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "not_whitelisted" }));
@@ -192,6 +207,12 @@ async function handleYoutubeApi(req, res, hostname) {
 
 function requestHandler(req, res) {
   const hostname = (req.headers.host || "").split(":")[0];
+
+  // Route /youtubei/v1/player on either www.youtube.com or youtubei.googleapis.com
+  if (req.url.includes("/youtubei/v1/player") && (YOUTUBE_HOSTS.has(hostname) || YOUTUBE_API_HOSTS.has(hostname))) {
+    handleYoutubeApi(req, res, hostname);
+    return;
+  }
 
   // YouTube is handled by the whitelist first, so approved videos stay playable even
   // once a youtube.com time budget is exhausted. handleYoutubeSite applies the budget
@@ -264,7 +285,13 @@ async function start() {
   });
 
   await listenOrFail(httpsServer, 443, "HTTPS intercept");
-  await listenOrFail(httpServer, 80, "HTTP redirect");
+  try {
+    await listenOrFail(httpServer, 80, "HTTP redirect");
+  } catch (err) {
+    // Port 80 is only for HTTP->HTTPS redirects. If it is already in use by Windows (IIS, http.sys, etc.),
+    // continue running HTTPS intercept on 443 so we don't abort the entire agent.
+    log("Warning: HTTP redirect listener on port 80 could not start:", err.message);
+  }
 
   // Runtime errors after a successful bind shouldn't take the process down.
   httpsServer.on("error", (err) => log("HTTPS intercept server error:", err.message));
@@ -275,3 +302,4 @@ async function start() {
 
 // requestHandler is exported for the routing tests in test/routing.test.js.
 module.exports = { start, setYoutubeRules, setBlockedDomains, setCustomBlockHtml, requestHandler };
+
