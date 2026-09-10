@@ -120,8 +120,8 @@ const PASSTHROUGH = "DNS resolution failed"; // proxyPassthrough reached, then s
   console.log("PASS  player API call with whitelisted playlistId passes through");
 
   r = await run(makeApiReq({ body: { videoId: "RANDOMVID", playlistId: "PLOTHER" } }));
-  assert(r.status === 403 && r.body.includes("not_whitelisted"), "player API call with non-whitelisted playlistId must return 403");
-  console.log("PASS  player API call with non-whitelisted playlistId returns 403");
+  assert(r.body.includes("not on your approved Guardrail whitelist"), "player API call with non-whitelisted playlistId must return blocked playabilityStatus");
+  console.log("PASS  player API call with non-whitelisted playlistId returns blocked playabilityStatus");
 
   // 6. Next API calls (/youtubei/v1/next)
   r = await run(makeApiReq({ url: "/youtubei/v1/next", body: { videoId: "RANDOMVID", playlistId: "PLAPPROVED123" } }));
@@ -129,8 +129,8 @@ const PASSTHROUGH = "DNS resolution failed"; // proxyPassthrough reached, then s
   console.log("PASS  next API call with whitelisted playlistId passes through");
 
   r = await run(makeApiReq({ url: "/youtubei/v1/next", body: { videoId: "RANDOMVID", playlistId: "PLOTHER" } }));
-  assert(r.status === 403 && r.body.includes("not_whitelisted"), "next API call with non-whitelisted playlistId must return 403");
-  console.log("PASS  next API call with non-whitelisted playlistId returns 403");
+  assert(r.body.includes("contents") && !r.body.includes(PASSTHROUGH), "next API call with non-whitelisted playlistId must return empty contents");
+  console.log("PASS  next API call with non-whitelisted playlistId returns empty contents");
 
 
   // Custom block HTML tests
