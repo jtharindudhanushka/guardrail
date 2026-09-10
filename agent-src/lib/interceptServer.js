@@ -56,6 +56,122 @@ function ignoreStreamErrors(...streams) {
   }
 }
 
+const YOUTUBE_INJECTION = `
+<style id="guardrail-distraction-free">
+  #related,
+  ytd-watch-next-secondary-results-renderer,
+  .ytp-endscreen-content,
+  .ytp-ce-element,
+  .ytp-ce-video,
+  .ytp-ce-playlist,
+  .ytp-ce-channel,
+  .ytp-ce-covering-overlay,
+  .ytp-cards-teaser,
+  ytd-shelf-renderer,
+  ytd-reel-shelf-renderer {
+    display: none !important;
+  }
+  ytd-watch-flexy:not([theater]):not([fullscreen]) #primary.ytd-watch-flexy {
+    max-width: 1280px !important;
+    margin: 0 auto !important;
+  }
+</style>
+<script id="guardrail-spa-guard">
+  (function() {
+    function disableAutoplay() {
+      var btn = document.querySelector('.ytp-autonav-toggle-button[aria-checked="true"]');
+      if (btn) btn.click();
+    }
+    setInterval(disableAutoplay, 1500);
+
+    // Intercept clicks on links that lead to videos to force full top-level navigation
+    document.addEventListener('click', function(e) {
+      var a = e.target && e.target.closest ? e.target.closest('a') : null;
+      if (a && a.href) {
+        var h = a.href;
+        if (h.indexOf('/watch') !== -1 || h.indexOf('/shorts/') !== -1) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.location.href = h;
+        }
+      }
+    }, true);
+
+    // Intercept SPA pushState to prevent background client-side navigation
+    var origPush = history.pushState;
+    history.pushState = function(state, title, url) {
+      if (url && (String(url).indexOf('/watch') !== -1 || String(url).indexOf('/shorts/') !== -1)) {
+        window.location.href = url;
+        return;
+      }
+      return origPush.apply(this, arguments);
+    };
+  })();
+</script>
+`;
+
+function proxyYoutubeDocument(req, res, hostname) {
+  ignoreStreamErrors(req, res);
+
+  dns.resolveReal(hostname)
+    .then((ip) => {
+      const headers = { ...req.headers, host: hostname };
+      delete headers["accept-encoding"]; // Request uncompressed HTML to inject style & script cleanly
+
+      const upstream = https.request(
+        {
+          host: ip,
+          servername: hostname,
+          port: 443,
+          method: req.method,
+          path: req.url,
+          headers,
+          rejectUnauthorized: false,
+        },
+        (upstreamRes) => {
+          ignoreStreamErrors(upstreamRes);
+          if (res.headersSent || res.writableEnded) return;
+
+          const contentType = (upstreamRes.headers["content-type"] || "").toLowerCase();
+          if (!contentType.includes("text/html")) {
+            res.writeHead(upstreamRes.statusCode || 200, upstreamRes.headers);
+            upstreamRes.pipe(res);
+            return;
+          }
+
+          const outHeaders = { ...upstreamRes.headers };
+          delete outHeaders["content-security-policy"];
+          delete outHeaders["content-security-policy-report-only"];
+          delete outHeaders["content-length"];
+
+          res.writeHead(upstreamRes.statusCode || 200, outHeaders);
+
+          let injected = false;
+          upstreamRes.on("data", (chunk) => {
+            if (!injected) {
+              const str = chunk.toString("utf8");
+              const headMatch = str.match(/<head[^>]*>/i);
+              if (headMatch) {
+                const headTag = headMatch[0];
+                const modified = str.replace(headTag, headTag + YOUTUBE_INJECTION);
+                injected = true;
+                res.write(Buffer.from(modified, "utf8"));
+                return;
+              }
+            }
+            res.write(chunk);
+          });
+          upstreamRes.on("end", () => {
+            res.end();
+          });
+        }
+      );
+      upstream.on("error", () => failResponse(res, 502, "Upstream error"));
+      req.pipe(upstream);
+    })
+    .catch(() => failResponse(res, 502, "DNS resolution failed"));
+}
+
 function proxyPassthrough(req, res, hostname) {
   ignoreStreamErrors(req, res);
 
@@ -113,7 +229,11 @@ async function handleYoutubeSite(req, res, hostname) {
       return;
     }
     // Explicitly approved content is exempt from any youtube.com time budget.
-    proxyPassthrough(req, res, hostname);
+    if (isDocumentRequest(req)) {
+      proxyYoutubeDocument(req, res, hostname);
+    } else {
+      proxyPassthrough(req, res, hostname);
+    }
     return;
   }
 
@@ -122,7 +242,11 @@ async function handleYoutubeSite(req, res, hostname) {
     const listId = url.searchParams.get("list");
     const isApprovedPlaylist = listId && currentYoutubeRules.some((r) => r.type === "PLAYLIST" && r.value === listId);
     if (isApprovedPlaylist) {
-      proxyPassthrough(req, res, hostname);
+      if (isDocumentRequest(req)) {
+        proxyYoutubeDocument(req, res, hostname);
+      } else {
+        proxyPassthrough(req, res, hostname);
+      }
       return;
     }
   }
@@ -142,15 +266,19 @@ async function handleYoutubeSite(req, res, hostname) {
     return;
   }
 
-  proxyPassthrough(req, res, hostname);
+  if (isDocumentRequest(req)) {
+    proxyYoutubeDocument(req, res, hostname);
+  } else {
+    proxyPassthrough(req, res, hostname);
+  }
 }
 
 async function handleYoutubeApi(req, res, hostname) {
   ignoreStreamErrors(req, res);
   const url = new URL(req.url, `https://${hostname}`);
-  const isPlayerCall = url.pathname.includes("/youtubei/v1/player");
+  const isGatedApiCall = url.pathname.includes("/youtubei/v1/player") || url.pathname.includes("/youtubei/v1/next");
 
-  if (!isPlayerCall) {
+  if (!isGatedApiCall) {
     proxyPassthrough(req, res, hostname);
     return;
   }
@@ -208,11 +336,13 @@ async function handleYoutubeApi(req, res, hostname) {
 function requestHandler(req, res) {
   const hostname = (req.headers.host || "").split(":")[0];
 
-  // Route /youtubei/v1/player on either www.youtube.com or youtubei.googleapis.com
-  if (req.url.includes("/youtubei/v1/player") && (YOUTUBE_HOSTS.has(hostname) || YOUTUBE_API_HOSTS.has(hostname))) {
+  // Route /youtubei/v1/player and /youtubei/v1/next on either www.youtube.com or youtubei.googleapis.com
+  const isYoutubeApi = req.url.includes("/youtubei/v1/player") || req.url.includes("/youtubei/v1/next");
+  if (isYoutubeApi && (YOUTUBE_HOSTS.has(hostname) || YOUTUBE_API_HOSTS.has(hostname))) {
     handleYoutubeApi(req, res, hostname);
     return;
   }
+
 
   // YouTube is handled by the whitelist first, so approved videos stay playable even
   // once a youtube.com time budget is exhausted. handleYoutubeSite applies the budget

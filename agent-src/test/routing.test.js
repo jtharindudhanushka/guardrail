@@ -123,6 +123,16 @@ const PASSTHROUGH = "DNS resolution failed"; // proxyPassthrough reached, then s
   assert(r.status === 403 && r.body.includes("not_whitelisted"), "player API call with non-whitelisted playlistId must return 403");
   console.log("PASS  player API call with non-whitelisted playlistId returns 403");
 
+  // 6. Next API calls (/youtubei/v1/next)
+  r = await run(makeApiReq({ url: "/youtubei/v1/next", body: { videoId: "RANDOMVID", playlistId: "PLAPPROVED123" } }));
+  assert(r.body.includes(PASSTHROUGH), "next API call with whitelisted playlistId must pass through");
+  console.log("PASS  next API call with whitelisted playlistId passes through");
+
+  r = await run(makeApiReq({ url: "/youtubei/v1/next", body: { videoId: "RANDOMVID", playlistId: "PLOTHER" } }));
+  assert(r.status === 403 && r.body.includes("not_whitelisted"), "next API call with non-whitelisted playlistId must return 403");
+  console.log("PASS  next API call with non-whitelisted playlistId returns 403");
+
+
   // Custom block HTML tests
   interceptServer.setBlockedDomains(["instagram.com"]);
   interceptServer.setCustomBlockHtml("<div class='custom'>Blocked {{domain}} - {{title}}</div>");
